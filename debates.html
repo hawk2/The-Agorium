@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>The Agora — Debates</title>
+  <title>The Agorium — Debates</title>
   <link rel="icon" type="image/png" href="logo.png" />
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
@@ -159,8 +159,8 @@
 
   <nav>
     <a class="nav-logo" href="index.html">
-      <img src="logo.png" alt="The Agora" />
-      <span class="nav-logo-text">The Agora</span>
+      <img src="logo.png" alt="The Agorium" />
+      <span class="nav-logo-text">The Agorium</span>
     </a>
     <ul class="nav-links">
       <li><a href="index.html">Home</a></li>
@@ -170,8 +170,8 @@
       <li><a href="rules.html">Rules</a></li>
     </ul>
     <div class="nav-cta" id="nav-cta">
-      <button class="btn btn-outline" onclick="openModal()">Sign In</button>
-      <button class="btn btn-primary" onclick="openModal()">Join</button>
+      <a class="btn btn-outline" href="auth.html?mode=signin&redirect=debates.html">Sign In</a>
+      <a class="btn btn-primary" href="auth.html?mode=signup&redirect=debates.html">Join</a>
     </div>
   </nav>
 
@@ -190,14 +190,14 @@
           <p class="section-label">Open Now</p>
           <h2 class="section-title">All Debates</h2>
         </div>
-        <button class="new-debate-btn" onclick="requireAuth(() => location.href='submit.html')">+ Start a Debate</button>
+      <button class="new-debate-btn" onclick="requireAuth('submit.html')">+ Start a Debate</button>
       </div>
 
       <div class="empty-state" id="empty-state">
         <span class="empty-icon">⚖️</span>
         <h3 class="empty-title">The floor is open.</h3>
-        <p class="empty-sub">No debates have been started yet. The Agora is yours — bring a question worth arguing about.</p>
-        <button class="empty-btn" onclick="requireAuth(() => location.href='submit.html')">Start the First Debate</button>
+        <p class="empty-sub">No debates have been started yet. The Agorium is yours — bring a question worth arguing about.</p>
+        <button class="empty-btn" onclick="requireAuth('submit.html')">Start the First Debate</button>
       </div>
 
       <div class="debates-grid" id="debates-grid" style="display:none;"></div>
@@ -235,7 +235,7 @@
 
       <!-- CREATE ACCOUNT PANEL -->
       <div class="modal-panel" id="panel-signup">
-        <h2 class="modal-title">Join The Agora.</h2>
+        <h2 class="modal-title">Join The Agorium.</h2>
         <p class="modal-desc">Create an account to post debates and arguments.</p>
         <div class="modal-error-global" id="signup-error"></div>
         <div class="modal-field">
@@ -264,7 +264,7 @@
 
   <footer>
     <div>
-      <div class="footer-logo">The Agora</div>
+      <div class="footer-logo">The Agorium</div>
       <div class="footer-motto">"Strong opinions, loosely held." — Paul Saffo</div>
     </div>
     <ul class="footer-links">
@@ -273,7 +273,7 @@
       <li><a href="about.html">About</a></li>
       <li><a href="rules.html">Rules</a></li>
     </ul>
-    <div style="font-size:13px;">© 2026 The Agora · Hawken Parkman</div>
+    <div style="font-size:13px;">© 2026 The Agorium · Hawken Parkman</div>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -282,26 +282,25 @@
     // ── AUTH STORE ─────────────────────────────────────────────────────────────
     // Session is managed by Supabase Auth. Local `agora_user` stores display username.
 
-    // ── MODAL STATE ────────────────────────────────────────────────────────────
+    // ── AUTH PAGE ROUTING ──────────────────────────────────────────────────────
+    function authUrl(mode, redirectPath) {
+      const m = mode === 'signup' ? 'signup' : 'signin';
+      const r = encodeURIComponent(redirectPath || 'debates.html');
+      return `auth.html?mode=${m}&redirect=${r}`;
+    }
     let _afterLogin = null;
 
-    async function requireAuth(then) {
+    async function requireAuth(redirectPath) {
       const user = localStorage.getItem('agora_user') || await AgoraStore.syncAuthUser();
-      if (user) { then(); return; }
-      _afterLogin = then;
-      openModal('signin');
+      if (user) {
+        location.href = redirectPath || 'debates.html';
+        return;
+      }
+      location.href = authUrl('signin', redirectPath || 'debates.html');
     }
 
     function openModal(tab) {
-      switchTab(tab || 'signin');
-      clearModalErrors();
-      document.getElementById('auth-modal').style.display = 'flex';
-      setTimeout(() => {
-        const f = tab === 'signup'
-          ? document.getElementById('signup-username')
-          : document.getElementById('signin-username');
-        f && f.focus();
-      }, 60);
+      location.href = authUrl(tab || 'signin', 'debates.html');
     }
 
     function closeModal(preserveAfterLogin) {
@@ -444,9 +443,8 @@
         navCta.innerHTML = `<a class="nav-user" href="${href}">@${user}</a>
           <button class="btn btn-outline" onclick="signOut()">Sign Out</button>`;
       } else {
-        navCta.innerHTML = `
-          <button class="btn btn-outline" onclick="openModal('signin')">Sign In</button>
-          <button class="btn btn-primary"  onclick="openModal('signup')">Join</button>`;
+        navCta.innerHTML = `<a class="btn btn-outline" href="${authUrl('signin', 'debates.html')}">Sign In</a>
+          <a class="btn btn-primary" href="${authUrl('signup', 'debates.html')}">Join</a>`;
       }
     }
 

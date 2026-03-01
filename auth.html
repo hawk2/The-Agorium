@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>The Agorium - Account</title>
+  <link rel="icon" type="image/png" href="logo.png" />
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green:  #358f65;
+      --blue:   #71a9f7;
+      --white:  #ffffff;
+      --navy:   #2e5077;
+      --red:    #A41623;
+      --cream:  #f5f0e8;
+      --ink:    #1a1a2e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      background: var(--cream);
+      color: var(--ink);
+      font-family: 'EB Garamond', Georgia, serif;
+      display: flex;
+      flex-direction: column;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 1000;
+      opacity: 0.35;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      height: 68px;
+      background: rgba(46,80,119,0.97);
+      border-bottom: 1px solid rgba(113,169,247,0.2);
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: white;
+    }
+    .nav-logo img { width: 42px; height: 42px; object-fit: contain; }
+    .nav-logo-text {
+      font-family: 'Cinzel', serif;
+      font-size: 20px;
+      letter-spacing: 0.04em;
+      color: var(--white);
+    }
+    .nav-back {
+      color: rgba(255,255,255,0.72);
+      text-decoration: none;
+      font-family: 'Cinzel', serif;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .nav-back:hover { color: var(--blue); }
+
+    main {
+      flex: 1;
+      display: grid;
+      place-items: center;
+      padding: 32px 20px 50px;
+    }
+    .auth-card {
+      width: 100%;
+      max-width: 470px;
+      background: white;
+      border-top: 4px solid var(--navy);
+      border-radius: 3px;
+      padding: 32px;
+      box-shadow: 0 14px 38px rgba(46,80,119,0.12);
+      animation: cardIn 0.28s ease both;
+      position: relative;
+      z-index: 2;
+    }
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .tabs {
+      display: flex;
+      border-bottom: 2px solid rgba(46,80,119,0.12);
+      margin-bottom: 24px;
+    }
+    .tab {
+      font-family: 'Cinzel', serif;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 10px 20px 10px 0;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #aaa;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+    }
+    .tab.active { color: var(--navy); border-bottom-color: var(--navy); }
+    .tab:hover:not(.active) { color: var(--navy); }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .title {
+      font-family: 'Cinzel', serif;
+      font-size: 22px;
+      color: var(--navy);
+      margin-bottom: 6px;
+    }
+    .desc {
+      font-size: 15px;
+      color: #888;
+      margin-bottom: 18px;
+      line-height: 1.5;
+    }
+    .global-err {
+      display: none;
+      font-family: 'Cinzel', serif;
+      font-size: 12px;
+      color: var(--red);
+      background: rgba(164,22,35,0.06);
+      border: 1px solid rgba(164,22,35,0.2);
+      border-radius: 3px;
+      padding: 9px 13px;
+      margin-bottom: 14px;
+    }
+    .global-err.show { display: block; }
+    .field { margin-bottom: 13px; }
+    .label {
+      display: block;
+      font-family: 'Cinzel', serif;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--navy);
+      margin-bottom: 5px;
+    }
+    .input {
+      width: 100%;
+      font-family: 'EB Garamond', serif;
+      font-size: 17px;
+      padding: 10px 13px;
+      border: 1px solid rgba(46,80,119,0.25);
+      border-radius: 3px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .input:focus {
+      border-color: var(--navy);
+      box-shadow: 0 0 0 3px rgba(46,80,119,0.08);
+    }
+    .input.err { border-color: var(--red); }
+    .field-err {
+      display: none;
+      margin-top: 5px;
+      color: var(--red);
+      font-family: 'Cinzel', serif;
+      font-size: 11px;
+    }
+    .field-err.show { display: block; }
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .btn-primary {
+      flex: 1;
+      border: none;
+      border-radius: 2px;
+      padding: 11px 16px;
+      cursor: pointer;
+      font-family: 'Cinzel', serif;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      background: var(--navy);
+      color: white;
+      transition: all 0.2s;
+    }
+    .btn-primary:hover { background: #1e3a5f; }
+    .btn-secondary {
+      border: 1px solid #ddd;
+      border-radius: 2px;
+      padding: 11px 16px;
+      cursor: pointer;
+      text-decoration: none;
+      font-family: 'Cinzel', serif;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      color: #888;
+      background: white;
+      text-align: center;
+    }
+    .btn-secondary:hover { color: var(--navy); border-color: var(--navy); }
+  </style>
+</head>
+<body>
+  <nav>
+    <a class="nav-logo" href="index.html">
+      <img src="logo.png" alt="The Agorium" />
+      <span class="nav-logo-text">The Agorium</span>
+    </a>
+    <a class="nav-back" id="back-link" href="debates.html">Back</a>
+  </nav>
+
+  <main>
+    <div class="auth-card">
+      <div class="tabs">
+        <button class="tab active" id="tab-signin" onclick="switchTab('signin')">Sign In</button>
+        <button class="tab" id="tab-signup" onclick="switchTab('signup')">Create Account</button>
+      </div>
+
+      <div class="panel active" id="panel-signin">
+        <h1 class="title">Welcome back.</h1>
+        <p class="desc">Sign in with your email and password.</p>
+        <div class="global-err" id="signin-error"></div>
+
+        <div class="field">
+          <label class="label">Email</label>
+          <input type="email" id="signin-email" class="input" placeholder="you@example.com" autocomplete="email" />
+        </div>
+        <div class="field">
+          <label class="label">Password</label>
+          <input type="password" id="signin-password" class="input" placeholder="••••••••" autocomplete="current-password" />
+        </div>
+        <div class="actions">
+          <button class="btn-primary" onclick="doSignIn()">Sign In ✦</button>
+          <a class="btn-secondary" id="cancel-link-signin" href="debates.html">Cancel</a>
+        </div>
+      </div>
+
+      <div class="panel" id="panel-signup">
+        <h1 class="title">Join The Agorium.</h1>
+        <p class="desc">Create an account to post debates and arguments.</p>
+        <div class="global-err" id="signup-error"></div>
+
+        <div class="field">
+          <label class="label">Username</label>
+          <input type="text" id="signup-username" class="input" placeholder="your_username" maxlength="30" autocomplete="username" />
+          <div class="field-err" id="err-signup-username"></div>
+        </div>
+        <div class="field">
+          <label class="label">Email</label>
+          <input type="email" id="signup-email" class="input" placeholder="you@example.com" autocomplete="email" />
+          <div class="field-err" id="err-signup-email"></div>
+        </div>
+        <div class="field">
+          <label class="label">Password</label>
+          <input type="password" id="signup-password" class="input" placeholder="At least 6 characters" autocomplete="new-password" />
+          <div class="field-err" id="err-signup-password"></div>
+        </div>
+        <div class="actions">
+          <button class="btn-primary" onclick="doSignUp()">Create Account ✦</button>
+          <a class="btn-secondary" id="cancel-link-signup" href="debates.html">Cancel</a>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="store.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const startMode = params.get('mode') === 'signup' ? 'signup' : 'signin';
+
+    function normalizeRedirect(input) {
+      let v = String(input || '').trim();
+      if (!v) {
+        const legacy = sessionStorage.getItem('agora_redirect');
+        if (legacy) {
+          sessionStorage.removeItem('agora_redirect');
+          v = legacy.endsWith('.html') ? legacy : legacy + '.html';
+        }
+      }
+      if (!v) v = 'debates.html';
+      if (/^(https?:|\/\/|javascript:|data:)/i.test(v)) return 'debates.html';
+      if (!/^[A-Za-z0-9._\/?&=%#-]+$/.test(v)) return 'debates.html';
+      if (!/\.html(\?|#|$)/.test(v)) return 'debates.html';
+      return v;
+    }
+
+    const redirectTarget = normalizeRedirect(params.get('redirect'));
+
+    function switchTab(tab) {
+      const isSignUp = tab === 'signup';
+      document.getElementById('tab-signin').classList.toggle('active', !isSignUp);
+      document.getElementById('tab-signup').classList.toggle('active', isSignUp);
+      document.getElementById('panel-signin').classList.toggle('active', !isSignUp);
+      document.getElementById('panel-signup').classList.toggle('active', isSignUp);
+      clearErrors();
+    }
+
+    function clearErrors() {
+      ['signin-error', 'signup-error', 'err-signup-username', 'err-signup-email', 'err-signup-password']
+        .forEach(id => {
+          const el = document.getElementById(id);
+          if (el) {
+            el.classList.remove('show');
+            el.textContent = '';
+          }
+        });
+      document.querySelectorAll('.input').forEach(i => i.classList.remove('err'));
+    }
+
+    function showGlobal(id, msg) {
+      const el = document.getElementById(id);
+      el.textContent = msg;
+      el.classList.add('show');
+    }
+
+    function showField(errId, inputId, msg) {
+      const err = document.getElementById(errId);
+      err.textContent = msg;
+      err.classList.add('show');
+      document.getElementById(inputId).classList.add('err');
+    }
+
+    function finishAuth(username) {
+      localStorage.setItem('agora_user', username);
+      location.replace(redirectTarget);
+    }
+
+    async function doSignIn() {
+      clearErrors();
+      const email = document.getElementById('signin-email').value.trim();
+      const password = document.getElementById('signin-password').value;
+
+      if (!email || !password) {
+        showGlobal('signin-error', 'Please enter your email and password.');
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showGlobal('signin-error', 'Please enter a valid email address.');
+        return;
+      }
+
+      const res = await AgoraStore.signInAccount({ email, password });
+      if (!res.ok) {
+        showGlobal('signin-error', (res.error || '').replace(/^signIn failed:\s*/i, '') || 'Invalid login credentials.');
+        document.getElementById('signin-password').classList.add('err');
+        return;
+      }
+
+      finishAuth(res.username);
+    }
+
+    async function doSignUp() {
+      clearErrors();
+      const username = document.getElementById('signup-username').value.trim();
+      const email = document.getElementById('signup-email').value.trim();
+      const password = document.getElementById('signup-password').value;
+      let valid = true;
+
+      if (!username || username.length < 2) {
+        showField('err-signup-username', 'signup-username', 'Username must be at least 2 characters.');
+        valid = false;
+      } else if (!/^[a-zA-Z0-9_\-\.]+$/.test(username)) {
+        showField('err-signup-username', 'signup-username', 'Letters, numbers, _ - . only.');
+        valid = false;
+      }
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showField('err-signup-email', 'signup-email', 'Please enter a valid email address.');
+        valid = false;
+      }
+      if (!password || password.length < 6) {
+        showField('err-signup-password', 'signup-password', 'Password must be at least 6 characters.');
+        valid = false;
+      }
+      if (!valid) return;
+
+      const res = await AgoraStore.signUpAccount({ username, email, password });
+      if (!res.ok) {
+        const msg = (res.error || '').replace(/^signUp failed:\s*/i, '') || 'Could not create account.';
+        if (res.code === 'username_taken' || /username/i.test(msg)) {
+          showField('err-signup-username', 'signup-username', msg);
+        } else {
+          showGlobal('signup-error', msg);
+        }
+        return;
+      }
+
+      if (res.needsEmailConfirm) {
+        switchTab('signin');
+        showGlobal('signin-error', 'Check your email to confirm your account, then sign in.');
+        return;
+      }
+
+      finishAuth(res.username || username);
+    }
+
+    async function initAuthPage() {
+      const cancel = redirectTarget || 'debates.html';
+      document.getElementById('back-link').href = cancel;
+      document.getElementById('cancel-link-signin').href = cancel;
+      document.getElementById('cancel-link-signup').href = cancel;
+      switchTab(startMode);
+
+      const user = localStorage.getItem('agora_user') || await AgoraStore.syncAuthUser();
+      if (user) {
+        location.replace(redirectTarget);
+        return;
+      }
+
+      setTimeout(() => {
+        const focusEl = startMode === 'signup'
+          ? document.getElementById('signup-username')
+          : document.getElementById('signin-email');
+        if (focusEl) focusEl.focus();
+      }, 40);
+    }
+
+    document.getElementById('signin-email').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('signin-password').focus();
+    });
+    document.getElementById('signin-password').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doSignIn();
+    });
+    document.getElementById('signup-username').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('signup-email').focus();
+    });
+    document.getElementById('signup-email').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('signup-password').focus();
+    });
+    document.getElementById('signup-password').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doSignUp();
+    });
+
+    initAuthPage();
+  </script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>The Agora — Debate</title>
+  <title>The Agorium — Debate</title>
   <link rel="icon" type="image/png" href="logo.png" />
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,600&family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
@@ -530,8 +530,8 @@
   <!-- NAV -->
   <nav>
     <a class="nav-logo" href="index.html">
-      <img src="logo.png" alt="The Agora" />
-      <span class="nav-logo-text">The Agora</span>
+      <img src="logo.png" alt="The Agorium" />
+      <span class="nav-logo-text">The Agorium</span>
     </a>
     <ul class="nav-links">
       <li><a href="index.html">Home</a></li>
@@ -541,8 +541,8 @@
       <li><a href="rules.html">Rules</a></li>
     </ul>
     <div class="nav-cta" id="nav-cta">
-      <button class="btn btn-outline" onclick="openAuthModal('signin')">Sign In</button>
-      <button class="btn btn-primary"  onclick="openAuthModal('signup')">Join</button>
+      <a class="btn btn-outline" href="auth.html?mode=signin&redirect=debate.html">Sign In</a>
+      <a class="btn btn-primary" href="auth.html?mode=signup&redirect=debate.html">Join</a>
     </div>
   </nav>
 
@@ -695,7 +695,7 @@
 
       <!-- CREATE ACCOUNT -->
       <div class="auth-panel" id="auth-panel-signup">
-        <h2 class="auth-title">Join The Agora.</h2>
+        <h2 class="auth-title">Join The Agorium.</h2>
         <p class="auth-desc">Create an account to post arguments.</p>
         <div class="auth-global-err" id="auth-signup-err"></div>
         <div class="auth-field">
@@ -789,6 +789,11 @@
     let hasPosted = false;
     let currentPost = null;
     let drawerOpen = false;
+    function authUrl(mode, redirectPath) {
+      const m = mode === 'signup' ? 'signup' : 'signin';
+      const r = encodeURIComponent(redirectPath || 'debate.html');
+      return `auth.html?mode=${m}&redirect=${r}`;
+    }
 
     // ── LOAD ──
     async function loadPost() {
@@ -797,7 +802,7 @@
 
       const typeLabel = currentPost.type.charAt(0).toUpperCase() + currentPost.type.slice(1);
       document.getElementById('post-type-label').textContent = typeLabel;
-      document.title = 'The Agora — ' + currentPost.title;
+      document.title = 'The Agorium — ' + currentPost.title;
       document.getElementById('post-title').textContent = currentPost.title;
       document.getElementById('post-body').textContent = currentPost.body;
 
@@ -958,8 +963,7 @@
       if (!currentPost) return;
       const user = localStorage.getItem('agora_user') || await AgoraStore.syncAuthUser();
       if (!user) {
-        openAuthModal('signin');
-        showToast('Sign in to post an argument.');
+        location.href = authUrl('signin', 'debate.html');
         return;
       }
       const ta   = document.getElementById('post-textarea');
@@ -1069,15 +1073,7 @@
     // ── AUTH ──────────────────────────────────────────────────────────────────
 
     function openAuthModal(tab) {
-      authSwitchTab(tab || 'signin');
-      authClearErrors();
-      document.getElementById('auth-modal').classList.add('open');
-      setTimeout(() => {
-        const f = (tab === 'signup')
-          ? document.getElementById('auth-signup-username')
-          : document.getElementById('auth-signin-username');
-        f && f.focus();
-      }, 60);
+      location.href = authUrl(tab || 'signin', 'debate.html');
     }
 
     function closeAuthModal() {
@@ -1180,9 +1176,8 @@
         navCta.innerHTML = `<a class="nav-user" href="${href}">@${user}</a>
           <button class="btn btn-outline" onclick="authSignOut()">Sign Out</button>`;
       } else {
-        navCta.innerHTML = `
-          <button class="btn btn-outline" onclick="openAuthModal('signin')">Sign In</button>
-          <button class="btn btn-primary"  onclick="openAuthModal('signup')">Join</button>`;
+        navCta.innerHTML = `<a class="btn btn-outline" href="${authUrl('signin', 'debate.html')}">Sign In</a>
+          <a class="btn btn-primary" href="${authUrl('signup', 'debate.html')}">Join</a>`;
       }
     }
 

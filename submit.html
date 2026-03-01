@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>The Agora — New Post</title>
+  <title>The Agorium — New Post</title>
   <link rel="icon" type="image/png" href="logo.png" />
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
@@ -226,8 +226,8 @@
 
   <nav>
     <a class="nav-logo" href="index.html">
-      <img src="logo.png" alt="The Agora" />
-      <span class="nav-logo-text">The Agora</span>
+      <img src="logo.png" alt="The Agorium" />
+      <span class="nav-logo-text">The Agorium</span>
     </a>
     <ul class="nav-links">
       <li><a href="index.html">Home</a></li>
@@ -237,8 +237,8 @@
       <li><a href="rules.html">Rules</a></li>
     </ul>
     <div class="nav-cta" id="nav-cta">
-      <a href="debates.html" class="btn btn-outline">Sign In</a>
-      <a href="debates.html" class="btn btn-primary-nav">Join</a>
+      <a href="auth.html?mode=signin&redirect=submit.html" class="btn btn-outline">Sign In</a>
+      <a href="auth.html?mode=signup&redirect=submit.html" class="btn btn-primary-nav">Join</a>
     </div>
   </nav>
 
@@ -363,7 +363,7 @@
       <!-- SUBMIT -->
       <div class="form-footer">
         <a href="debates.html" class="btn-cancel">Cancel</a>
-        <button class="btn-post" id="submit-btn" onclick="submitPost()">Post to The Agora ✦</button>
+        <button class="btn-post" id="submit-btn" onclick="submitPost()">Post to The Agorium ✦</button>
       </div>
 
     </div>
@@ -372,7 +372,7 @@
     <div class="success-state" id="success-state">
       <span class="success-icon" id="success-icon">💬</span>
       <h2 class="success-title" id="success-title">Posted.</h2>
-      <p class="success-sub" id="success-sub">Your post is live on The Agora.</p>
+      <p class="success-sub" id="success-sub">Your post is live on The Agorium.</p>
       <div class="success-actions">
         <a href="debate.html" class="btn-success-primary" id="success-primary-btn">View Post →</a>
         <a href="debates.html" class="btn-success-secondary">Back to Debates</a>
@@ -387,8 +387,7 @@
     (async function() {
       const user = localStorage.getItem('agora_user') || await AgoraStore.syncAuthUser();
       if (!user) {
-        sessionStorage.setItem('agora_redirect', 'submit');
-        location.replace('debates.html');
+        location.replace('auth.html?mode=signin&redirect=submit.html');
       } else {
         const navCta = document.getElementById('nav-cta');
         if (navCta) {
@@ -435,7 +434,7 @@
         btnText: 'Start Discussion ✦',
         successIcon: '💬',
         successTitle: 'Discussion started.',
-        successSub: 'Your discussion is live on The Agora.'
+        successSub: 'Your discussion is live on The Agorium.'
       },
       question: {
         titleLabel: 'Question',
@@ -447,7 +446,7 @@
         btnText: 'Post Question ✦',
         successIcon: '❓',
         successTitle: 'Question posted.',
-        successSub: 'The Agora will weigh in.'
+        successSub: 'The Agorium will weigh in.'
       }
     };
 

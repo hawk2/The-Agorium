@@ -1,5 +1,5 @@
 /**
- * store.js — The Agora
+ * store.js — The Agorium
  * Supabase-backed data store. Swap SUPABASE_URL and SUPABASE_KEY below.
  * All data functions are async. Render helpers (renderPostCard, renderArgCard) stay sync.
  *

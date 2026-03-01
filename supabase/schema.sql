@@ -1,4 +1,4 @@
--- The Agora - Supabase schema bootstrap
+-- The Agorium - Supabase schema bootstrap
 -- Run in Supabase SQL Editor for project: auboquhnqswseneeosyj
 
 create table if not exists public.posts (

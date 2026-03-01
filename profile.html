@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>The Agora — Profile</title>
+  <title>The Agorium — Profile</title>
   <link rel="icon" type="image/png" href="logo.png" />
   <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Cinzel:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
@@ -133,8 +133,8 @@
 
   <nav>
     <a class="nav-logo" href="index.html">
-      <img src="logo.png" alt="The Agora" />
-      <span class="nav-logo-text">The Agora</span>
+      <img src="logo.png" alt="The Agorium" />
+      <span class="nav-logo-text">The Agorium</span>
     </a>
     <ul class="nav-links">
       <li><a href="index.html">Home</a></li>
@@ -276,9 +276,10 @@
         navCta.innerHTML = `<a class="nav-user" href="${href}">@${loggedInUser}</a>
           <button class="btn btn-outline" onclick="signOut()">Sign Out</button>`;
       } else {
+        const backTo = encodeURIComponent((location.pathname.split('/').pop() || 'profile.html') + location.search);
         navCta.innerHTML = `
-          <a class="btn btn-outline" href="debates.html">Sign In</a>
-          <a class="btn" style="background:var(--green);color:white;" href="debates.html">Join</a>`;
+          <a class="btn btn-outline" href="auth.html?mode=signin&redirect=${backTo}">Sign In</a>
+          <a class="btn" style="background:var(--green);color:white;" href="auth.html?mode=signup&redirect=${backTo}">Join</a>`;
       }
     }
 
@@ -385,7 +386,7 @@
       loggedInUser = loggedInUser || await AgoraStore.syncAuthUser();
       viewedUser = requestedUser || (loggedInUser || '').trim();
       isOwnProfile = !!loggedInUser && !!viewedUser && loggedInUser.toLowerCase() === viewedUser.toLowerCase();
-      if (!viewedUser) { location.replace('debates.html'); return; }
+      if (!viewedUser) { location.replace('auth.html?mode=signin&redirect=profile.html'); return; }
 
       updateNavAuth();
       if (isOwnProfile) {
