@@ -18,6 +18,16 @@
   // ────────────────────────────────────────────────────────────────────────────
 
   const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  let lastError = '';
+
+  function setLastError(context, error) {
+    if (!error) {
+      lastError = '';
+      return;
+    }
+    const code = error.code ? ` (${error.code})` : '';
+    lastError = `${context}${code}: ${error.message || String(error)}`;
+  }
 
   // ── HELPERS ──
   function uid() {
@@ -36,9 +46,202 @@
     return localStorage.getItem('agora_user') || 'You';
   }
 
+  function normalizeUsername(username) {
+    return String(username || '').trim();
+  }
+
+  function usernameKey(username) {
+    return normalizeUsername(username).toLowerCase();
+  }
+
+  function profileUrl(username) {
+    return 'profile.html?u=' + encodeURIComponent(normalizeUsername(username));
+  }
+
+  function sanitizeProfileFields(fields) {
+    const maxByField = {
+      bio: 1200,
+      tagline: 120,
+      occupation: 80,
+      goals: 400,
+      belief: 400,
+      hobbies: 160,
+    };
+    const out = {};
+    Object.keys(maxByField).forEach((k) => {
+      if (Object.prototype.hasOwnProperty.call(fields || {}, k)) {
+        out[k] = String(fields[k] || '').trim().slice(0, maxByField[k]);
+      }
+    });
+    return out;
+  }
+
+  // ── USERS / PUBLIC PROFILE ──
+
+  async function ensureUserProfile(username, seedFields, options) {
+    const name = normalizeUsername(username);
+    if (!name) return null;
+    const payload = Object.assign(
+      { username_lc: usernameKey(name), username: name },
+      sanitizeProfileFields(seedFields || {})
+    );
+    const { data, error } = await db
+      .from('users')
+      .upsert(payload, { onConflict: 'username_lc' })
+      .select('*')
+      .single();
+    if (error) {
+      if (!options || !options.silent) setLastError('ensureUserProfile failed', error);
+      console.error('ensureUserProfile:', error);
+      return null;
+    }
+    return data;
+  }
+
+  async function getUserProfile(username) {
+    const key = usernameKey(username);
+    if (!key) return null;
+    const { data, error } = await db.from('users').select('*').eq('username_lc', key).maybeSingle();
+    if (error) {
+      setLastError('getUserProfile failed', error);
+      console.error('getUserProfile:', error);
+      return null;
+    }
+    return data || null;
+  }
+
+  async function updateUserProfile(username, fields) {
+    const key = usernameKey(username);
+    if (!key) return null;
+    const updates = sanitizeProfileFields(fields || {});
+    updates.updatedat = new Date().toISOString();
+    const { data, error } = await db
+      .from('users')
+      .update(updates)
+      .eq('username_lc', key)
+      .select('*')
+      .single();
+    if (error) {
+      setLastError('updateUserProfile failed', error);
+      console.error('updateUserProfile:', error);
+      return null;
+    }
+    return data;
+  }
+
+  // ── AUTH (SUPABASE AUTH) ──
+
+  function getUsernameFromAuthUser(user, opts) {
+    const allowLocalFallback = !opts || opts.allowLocalFallback !== false;
+    const fromMeta = normalizeUsername(user?.user_metadata?.username);
+    if (fromMeta) return fromMeta;
+    if (allowLocalFallback) {
+      const fromLocal = localStorage.getItem('agora_user');
+      if (fromLocal) return normalizeUsername(fromLocal);
+    }
+    const fromEmail = String(user?.email || '').split('@')[0];
+    return normalizeUsername(fromEmail);
+  }
+
+  async function signUpAccount({ username, email, password }) {
+    setLastError('', null);
+    const name = normalizeUsername(username);
+    const emailNorm = String(email || '').trim().toLowerCase();
+
+    if (!/^[A-Za-z0-9_.-]{2,30}$/.test(name)) {
+      setLastError('signUp failed', { message: 'Username must be 2-30 chars: letters, numbers, _, -, .' });
+      return { ok: false, error: lastError };
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) {
+      setLastError('signUp failed', { message: 'Please enter a valid email address.' });
+      return { ok: false, error: lastError };
+    }
+    if (!password || password.length < 6) {
+      setLastError('signUp failed', { message: 'Password must be at least 6 characters.' });
+      return { ok: false, error: lastError };
+    }
+
+    const existing = await getUserProfile(name);
+    if (existing) {
+      setLastError('signUp failed', { message: 'That username is already taken.' });
+      return { ok: false, error: lastError, code: 'username_taken' };
+    }
+
+    const { data, error } = await db.auth.signUp({
+      email: emailNorm,
+      password,
+      options: { data: { username: name } },
+    });
+    if (error) {
+      setLastError('signUp failed', error);
+      return { ok: false, error: lastError };
+    }
+
+    const hasSession = !!data?.session;
+    const authUser = data?.user || null;
+    const authName = getUsernameFromAuthUser(authUser) || name;
+    if (hasSession) localStorage.setItem('agora_user', authName);
+
+    // Best effort: profile row for public profile pages.
+    await ensureUserProfile(authName, {}, { silent: true });
+
+    return {
+      ok: true,
+      username: authName,
+      needsEmailConfirm: !hasSession,
+    };
+  }
+
+  async function signInAccount({ email, password }) {
+    setLastError('', null);
+    const emailNorm = String(email || '').trim().toLowerCase();
+    const { data, error } = await db.auth.signInWithPassword({ email: emailNorm, password });
+    if (error) {
+      setLastError('signIn failed', error);
+      return { ok: false, error: lastError };
+    }
+    const authName = getUsernameFromAuthUser(data?.user, { allowLocalFallback: false });
+    if (!authName) {
+      setLastError('signIn failed', { message: 'Could not resolve username for this account.' });
+      return { ok: false, error: lastError };
+    }
+    localStorage.setItem('agora_user', authName);
+    await ensureUserProfile(authName, {}, { silent: true });
+    return { ok: true, username: authName };
+  }
+
+  async function signOutAccount() {
+    setLastError('', null);
+    const { error } = await db.auth.signOut();
+    localStorage.removeItem('agora_user');
+    if (error) {
+      setLastError('signOut failed', error);
+      return { ok: false, error: lastError };
+    }
+    return { ok: true };
+  }
+
+  async function syncAuthUser() {
+    setLastError('', null);
+    const { data, error } = await db.auth.getUser();
+    if (error || !data?.user) {
+      localStorage.removeItem('agora_user');
+      if (error && error.message && !/Auth session missing/i.test(error.message)) {
+        setLastError('syncAuthUser failed', error);
+      }
+      return null;
+    }
+    const authName = getUsernameFromAuthUser(data.user);
+    if (!authName) return null;
+    localStorage.setItem('agora_user', authName);
+    await ensureUserProfile(authName, {}, { silent: true });
+    return authName;
+  }
+
   // ── POSTS ──
 
   async function createPost({ type, title, body, tags, position, confidence, openingArgument, whatWouldChangeMyMind }) {
+    setLastError('', null);
     const post = {
       id:                    uid(),
       type,
@@ -56,22 +259,36 @@
       mindchanges:           0,
     };
 
+    // Best-effort profile row for public profile pages.
+    await ensureUserProfile(post.author, {}, { silent: true });
+
     const { error } = await db.from('posts').insert([post]);
-    if (error) { console.error('createPost:', error.message); return null; }
+    if (error) {
+      setLastError('createPost failed', error);
+      console.error('createPost:', error);
+      return null;
+    }
 
     // Upsert tags
     if (tags && tags.length) {
       const rows = tags.map(t => ({ tag: String(t).toLowerCase() }));
-      await db.from('tags').upsert(rows, { onConflict: 'tag', ignoreDuplicates: true });
+      const { error: tagErr } = await db.from('tags').upsert(rows, { onConflict: 'tag', ignoreDuplicates: true });
+      if (tagErr) {
+        setLastError('tags upsert failed', tagErr);
+        console.error('tags upsert:', tagErr);
+      }
     }
 
     // Opening argument
     if (openingArgument && openingArgument.trim()) {
-      await createArgument(post.id, {
+      const openingArg = await createArgument(post.id, {
         side:   position === 'for' || position === 'against' ? position : 'for',
         body:   openingArgument,
         author: post.author,
       });
+      if (!openingArg && !lastError) {
+        setLastError('opening argument failed', { message: 'Could not save opening argument.' });
+      }
     }
 
     return post;
@@ -98,6 +315,7 @@
   // ── ARGUMENTS ──
 
   async function createArgument(postId, { side, body, author }) {
+    setLastError('', null);
     const arg = {
       id:            uid(),
       postid:        postId,
@@ -109,8 +327,15 @@
       steelmancount: 0,
     };
 
+    // Best-effort profile row for public profile pages.
+    await ensureUserProfile(arg.author, {}, { silent: true });
+
     const { error } = await db.from('arguments').insert([arg]);
-    if (error) { console.error('createArgument:', error.message); return null; }
+    if (error) {
+      setLastError('createArgument failed', error);
+      console.error('createArgument:', error);
+      return null;
+    }
 
     // Init vote row for this argument
     await db.from('votes').insert([{ id: arg.id, argid: arg.id, up: 0, down: 0 }]);
@@ -274,11 +499,14 @@
     const side        = arg.side || 'for';
     const badgeClass  = side === 'for' ? 'badge-for' : side === 'against' ? 'badge-against' : 'badge-undecided';
     const sideLabel   = side === 'for' ? 'For' : side === 'against' ? 'Against' : 'Undecided';
-    const initials    = arg.author.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-    const bodyEsc     = escHtml(arg.body);
+    const authorName  = String(arg.author || 'Unknown');
+    const initials    = authorName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    const bodyEsc     = escHtml(arg.body || '');
+    const authorEsc   = escHtml(authorName);
+    const authorHref  = profileUrl(authorName);
 
     const bodyHtml = (function () {
-      const raw = arg.body;
+      const raw = String(arg.body || '');
       if (raw.startsWith('> ')) {
         const newlineIdx = raw.indexOf('\n\n');
         const quotePart  = newlineIdx > -1 ? raw.slice(0, newlineIdx) : raw;
@@ -301,7 +529,7 @@
           <div class="arg-author">
             <div class="avatar" style="background:var(--navy);">${initials}</div>
             <div class="arg-meta">
-              <span class="arg-name">${escHtml(arg.author)}</span>
+              <a class="arg-name" href="${authorHref}" style="text-decoration:none;">${authorEsc}</a>
               <span class="arg-time">${timeAgo(arg.createdat)}</span>
             </div>
           </div>
@@ -309,7 +537,7 @@
         </div>
         ${bodyHtml}
         <div class="arg-footer">
-          <button class="arg-action quote-btn" onclick="quoteArg('${arg.id}', '${escHtml(arg.author).replace(/'/g, "\\'")}')">❝ Quote</button>
+          <button class="arg-action quote-btn" onclick="quoteArg('${arg.id}', '${escHtml(authorName).replace(/'/g, "\\'")}')">❝ Quote</button>
           <button class="arg-action report-btn" onclick="openReport('${arg.id}')">⚑ Report</button>
           <div class="arg-votes">
             <button class="vote-btn up ${v.userVote === 'up' ? 'active-up' : ''}"
@@ -332,6 +560,7 @@
 
   // ── PUBLIC API ──
   window.AgoraStore = {
+    signUpAccount, signInAccount, signOutAccount, syncAuthUser,
     createPost, getPost, getAllPosts, getPostsByType,
     setCurrentPost, getCurrentPost,
     createArgument, getArguments,
@@ -339,6 +568,8 @@
     toggleSteelman,
     declareMindChange,
     getAllTags,
+    ensureUserProfile, getUserProfile, updateUserProfile, profileUrl,
+    getLastError: () => lastError,
     renderPostCard, renderArgCard,
     timeAgo, escHtml,
   };

@@ -384,19 +384,25 @@
   <script src="store.js"></script>
   <script>
     // ── AUTH GATE ──
-    (function() {
-      const user = localStorage.getItem('agora_user');
+    (async function() {
+      const user = localStorage.getItem('agora_user') || await AgoraStore.syncAuthUser();
       if (!user) {
         sessionStorage.setItem('agora_redirect', 'submit');
         location.replace('debates.html');
       } else {
         const navCta = document.getElementById('nav-cta');
         if (navCta) {
-          navCta.innerHTML = `<span style="font-family:'Cinzel',serif;font-size:13px;letter-spacing:0.08em;color:var(--blue);">@${user}</span>
-            <button class="btn btn-outline" onclick="localStorage.removeItem('agora_user'); location.href='debates.html'">Sign Out</button>`;
+          const href = AgoraStore.profileUrl(user);
+          navCta.innerHTML = `<a href="${href}" style="font-family:'Cinzel',serif;font-size:13px;letter-spacing:0.08em;color:var(--blue);text-decoration:none;">@${user}</a>
+            <button class="btn btn-outline" onclick="signOutFromSubmit()">Sign Out</button>`;
         }
       }
     })();
+
+    async function signOutFromSubmit() {
+      await AgoraStore.signOutAccount();
+      location.href = 'debates.html';
+    }
 
     let selectedType = '';
     let selectedPosition = 'none';
@@ -620,7 +626,8 @@
       if (!post) {
         btn.disabled = false;
         btn.textContent = typeConfig[selectedType].btnText;
-        alert('Failed to post — check your connection and try again.');
+        const detail = (window.AgoraStore && AgoraStore.getLastError) ? AgoraStore.getLastError() : '';
+        alert(detail ? `Failed to post — ${detail}` : 'Failed to post — check your connection and try again.');
         return;
       }
 

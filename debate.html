@@ -522,7 +522,7 @@
     .auth-btn-primary:hover { background: #1e3a5f; }
     .auth-btn-cancel  { font-family: 'Cinzel', serif; font-size: 13px; letter-spacing: 0.08em; padding: 11px 20px; background: transparent; color: #aaa; border: 1px solid #ddd; border-radius: 2px; cursor: pointer; transition: all 0.2s; }
     .auth-btn-cancel:hover { color: var(--navy); border-color: var(--navy); }
-    .nav-user { font-family: 'Cinzel', serif; font-size: 13px; letter-spacing: 0.08em; color: var(--blue); }
+    .nav-user { font-family: 'Cinzel', serif; font-size: 13px; letter-spacing: 0.08em; color: var(--blue); text-decoration: none; }
   </style>
 </head>
 <body>
@@ -677,11 +677,11 @@
       <!-- SIGN IN -->
       <div class="auth-panel active" id="auth-panel-signin">
         <h2 class="auth-title">Welcome back.</h2>
-        <p class="auth-desc">Sign in with your username and password.</p>
+        <p class="auth-desc">Sign in with your email and password.</p>
         <div class="auth-global-err" id="auth-signin-err"></div>
         <div class="auth-field">
-          <label class="auth-label">Username</label>
-          <input type="text"     id="auth-signin-username" class="auth-input" placeholder="your_username" maxlength="30" autocomplete="username" />
+          <label class="auth-label">Email</label>
+          <input type="email"    id="auth-signin-username" class="auth-input" placeholder="you@example.com" autocomplete="email" />
         </div>
         <div class="auth-field">
           <label class="auth-label">Password</label>
@@ -954,8 +954,14 @@
       document.getElementById('compose-quote').classList.remove('visible');
     }
 
-    function postArgument() {
+    async function postArgument() {
       if (!currentPost) return;
+      const user = localStorage.getItem('agora_user') || await AgoraStore.syncAuthUser();
+      if (!user) {
+        openAuthModal('signin');
+        showToast('Sign in to post an argument.');
+        return;
+      }
       const ta   = document.getElementById('post-textarea');
       const text = ta.value.trim();
       if (!text)          { showToast('Write something first.'); return; }
@@ -982,11 +988,15 @@
 
       currentSide = side;
       closeSidePicker();
+
+      const created = await AgoraStore.createArgument(currentPost.id, { side, body });
+      if (!created) {
+        showToast((AgoraStore.getLastError && AgoraStore.getLastError()) || 'Could not post argument.');
+        return;
+      }
       ta.value = '';
       updateCount();
       clearQuote();
-
-      await AgoraStore.createArgument(currentPost.id, { side, body });
       await renderThread();
       await updateStats();
 
@@ -1057,10 +1067,6 @@
     });
 
     // ── AUTH ──────────────────────────────────────────────────────────────────
-    function getAccounts() {
-      try { return JSON.parse(localStorage.getItem('agora_accounts') || '{}'); } catch { return {}; }
-    }
-    function saveAccounts(obj) { localStorage.setItem('agora_accounts', JSON.stringify(obj)); }
 
     function openAuthModal(tab) {
       authSwitchTab(tab || 'signin');
@@ -1111,22 +1117,22 @@
       document.getElementById(inputId).classList.add('err');
     }
 
-    function authDoSignIn() {
+    async function authDoSignIn() {
       authClearErrors();
-      const username = document.getElementById('auth-signin-username').value.trim();
+      const email = document.getElementById('auth-signin-username').value.trim();
       const password = document.getElementById('auth-signin-password').value;
-      if (!username || !password) { authShowGlobal('auth-signin-err', 'Please enter your username and password.'); return; }
-      const acct = getAccounts()[username.toLowerCase()];
-      if (!acct)              { authShowGlobal('auth-signin-err', 'No account found with that username.'); return; }
-      if (acct.password !== password) {
-        authShowGlobal('auth-signin-err', 'Incorrect password.');
+      if (!email || !password) { authShowGlobal('auth-signin-err', 'Please enter your email and password.'); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { authShowGlobal('auth-signin-err', 'Please enter a valid email address.'); return; }
+      const res = await AgoraStore.signInAccount({ email, password });
+      if (!res.ok) {
+        authShowGlobal('auth-signin-err', (res.error || '').replace(/^signIn failed:\s*/i, '') || 'Invalid login credentials.');
         document.getElementById('auth-signin-password').classList.add('err');
         return;
       }
-      authFinishLogin(acct.username);
+      await authFinishLogin(res.username);
     }
 
-    function authDoSignUp() {
+    async function authDoSignUp() {
       authClearErrors();
       const username = document.getElementById('auth-signup-username').value.trim();
       const email    = document.getElementById('auth-signup-email').value.trim();
@@ -1137,16 +1143,32 @@
       if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { authShowField('auth-err-email', 'auth-signup-email', 'Please enter a valid email address.'); valid = false; }
       if (!password || password.length < 6)          { authShowField('auth-err-password', 'auth-signup-password', 'Password must be at least 6 characters.'); valid = false; }
       if (!valid) return;
-      const accounts = getAccounts();
-      if (accounts[username.toLowerCase()]) { authShowField('auth-err-username', 'auth-signup-username', 'That username is already taken.'); return; }
-      accounts[username.toLowerCase()] = { username, email, password };
-      saveAccounts(accounts);
-      authFinishLogin(username);
+      const res = await AgoraStore.signUpAccount({ username, email, password });
+      if (!res.ok) {
+        const msg = (res.error || '').replace(/^signUp failed:\s*/i, '') || 'Could not create account.';
+        if (res.code === 'username_taken' || /username/i.test(msg)) {
+          authShowField('auth-err-username', 'auth-signup-username', msg);
+        } else {
+          authShowGlobal('auth-signup-err', msg);
+        }
+        return;
+      }
+      if (res.needsEmailConfirm) {
+        authSwitchTab('signin');
+        authShowGlobal('auth-signin-err', 'Check your email to confirm your account, then sign in.');
+        return;
+      }
+      await authFinishLogin(res.username || username);
     }
 
-    function authFinishLogin(username) {
+    async function authFinishLogin(username) {
       localStorage.setItem('agora_user', username);
       closeAuthModal();
+      updateNavAuth();
+    }
+
+    async function authSignOut() {
+      await AgoraStore.signOutAccount();
       updateNavAuth();
     }
 
@@ -1154,8 +1176,9 @@
       const user = localStorage.getItem('agora_user');
       const navCta = document.getElementById('nav-cta');
       if (user) {
-        navCta.innerHTML = `<span class="nav-user">@${user}</span>
-          <button class="btn btn-outline" onclick="localStorage.removeItem('agora_user'); updateNavAuth()">Sign Out</button>`;
+        const href = AgoraStore.profileUrl(user);
+        navCta.innerHTML = `<a class="nav-user" href="${href}">@${user}</a>
+          <button class="btn btn-outline" onclick="authSignOut()">Sign Out</button>`;
       } else {
         navCta.innerHTML = `
           <button class="btn btn-outline" onclick="openAuthModal('signin')">Sign In</button>
@@ -1170,8 +1193,13 @@
     document.getElementById('auth-signup-email').addEventListener('keydown',    e => { if (e.key === 'Enter') document.getElementById('auth-signup-password').focus(); });
     document.getElementById('auth-signup-password').addEventListener('keydown', e => { if (e.key === 'Enter') authDoSignUp(); });
 
-    updateNavAuth();
-    loadPost();
+    async function initPage() {
+      await AgoraStore.syncAuthUser();
+      updateNavAuth();
+      await loadPost();
+    }
+
+    initPage();
   </script>
 
 </body>

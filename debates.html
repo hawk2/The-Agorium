@@ -34,7 +34,7 @@
     .btn-outline:hover { border-color: var(--blue); color: var(--blue); }
     .btn-primary { background: var(--green); color: var(--white); }
     .btn-primary:hover { background: #2a7552; }
-    .nav-user { font-family: 'Cinzel', serif; font-size: 13px; letter-spacing: 0.08em; color: var(--blue); }
+    .nav-user { font-family: 'Cinzel', serif; font-size: 13px; letter-spacing: 0.08em; color: var(--blue); text-decoration: none; }
 
     /* PAGE HEADER */
     .page-hero {
@@ -217,11 +217,11 @@
       <!-- SIGN IN PANEL -->
       <div class="modal-panel active" id="panel-signin">
         <h2 class="modal-title">Welcome back.</h2>
-        <p class="modal-desc">Sign in with your username and password.</p>
+        <p class="modal-desc">Sign in with your email and password.</p>
         <div class="modal-error-global" id="signin-error"></div>
         <div class="modal-field">
-          <label class="modal-label">Username</label>
-          <input type="text" id="signin-username" class="modal-input" placeholder="your_username" maxlength="30" autocomplete="username" />
+          <label class="modal-label">Email</label>
+          <input type="email" id="signin-username" class="modal-input" placeholder="you@example.com" autocomplete="email" />
         </div>
         <div class="modal-field">
           <label class="modal-label">Password</label>
@@ -279,20 +279,15 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="store.js"></script>
   <script>
-    // ── ACCOUNT STORE (localStorage) ──────────────────────────────────────────
-    // agora_accounts: { [username_lower]: { username, email, password } }
-    // agora_user:     currently logged-in username (display form)
-
-    function getAccounts() {
-      try { return JSON.parse(localStorage.getItem('agora_accounts') || '{}'); } catch { return {}; }
-    }
-    function saveAccounts(obj) { localStorage.setItem('agora_accounts', JSON.stringify(obj)); }
+    // ── AUTH STORE ─────────────────────────────────────────────────────────────
+    // Session is managed by Supabase Auth. Local `agora_user` stores display username.
 
     // ── MODAL STATE ────────────────────────────────────────────────────────────
     let _afterLogin = null;
 
-    function requireAuth(then) {
-      if (localStorage.getItem('agora_user')) { then(); return; }
+    async function requireAuth(then) {
+      const user = localStorage.getItem('agora_user') || await AgoraStore.syncAuthUser();
+      if (user) { then(); return; }
       _afterLogin = then;
       openModal('signin');
     }
@@ -309,12 +304,12 @@
       }, 60);
     }
 
-    function closeModal() {
+    function closeModal(preserveAfterLogin) {
       document.getElementById('auth-modal').style.display = 'none';
       clearModalErrors();
       ['signin-username','signin-password','signup-username','signup-email','signup-password']
         .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-      _afterLogin = null;
+      if (!preserveAfterLogin) _afterLogin = null;
     }
 
     function handleOverlayClick(e) {
@@ -349,34 +344,32 @@
     }
 
     // ── SIGN IN ────────────────────────────────────────────────────────────────
-    function doSignIn() {
+    async function doSignIn() {
       clearModalErrors();
-      const username = document.getElementById('signin-username').value.trim();
+      const email = document.getElementById('signin-username').value.trim();
       const password = document.getElementById('signin-password').value;
 
-      if (!username || !password) {
-        showGlobalErr('signin-error', 'Please enter your username and password.');
+      if (!email || !password) {
+        showGlobalErr('signin-error', 'Please enter your email and password.');
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showGlobalErr('signin-error', 'Please enter a valid email address.');
         return;
       }
 
-      const accounts = getAccounts();
-      const acct = accounts[username.toLowerCase()];
-
-      if (!acct) {
-        showGlobalErr('signin-error', 'No account found with that username.');
-        return;
-      }
-      if (acct.password !== password) {
-        showGlobalErr('signin-error', 'Incorrect password.');
+      const res = await AgoraStore.signInAccount({ email, password });
+      if (!res.ok) {
+        showGlobalErr('signin-error', (res.error || '').replace(/^signIn failed:\s*/i, '') || 'Invalid login credentials.');
         document.getElementById('signin-password').classList.add('err');
         return;
       }
 
-      finishLogin(acct.username);
+      await finishLogin(res.username);
     }
 
     // ── SIGN UP ────────────────────────────────────────────────────────────────
-    function doSignUp() {
+    async function doSignUp() {
       clearModalErrors();
       const username = document.getElementById('signup-username').value.trim();
       const email    = document.getElementById('signup-email').value.trim();
@@ -403,21 +396,31 @@
 
       if (!valid) return;
 
-      const accounts = getAccounts();
-      if (accounts[username.toLowerCase()]) {
-        showFieldErr('err-signup-username', 'signup-username', 'That username is already taken.');
+      const res = await AgoraStore.signUpAccount({ username, email, password });
+      if (!res.ok) {
+        const msg = (res.error || '').replace(/^signUp failed:\s*/i, '') || 'Could not create account.';
+        if (res.code === 'username_taken' || /username/i.test(msg)) {
+          showFieldErr('err-signup-username', 'signup-username', msg);
+        } else {
+          showGlobalErr('signup-error', msg);
+        }
         return;
       }
 
-      accounts[username.toLowerCase()] = { username, email, password, joinedAt: new Date().toISOString() };
-      saveAccounts(accounts);
-      finishLogin(username);
+      if (res.needsEmailConfirm) {
+        switchTab('signin');
+        showGlobalErr('signin-error', 'Check your email to confirm your account, then sign in.');
+        return;
+      }
+
+      await finishLogin(res.username || username);
     }
 
     // ── SHARED LOGIN FINISH ────────────────────────────────────────────────────
-    function finishLogin(username) {
+    async function finishLogin(username) {
       localStorage.setItem('agora_user', username);
-      closeModal();
+      const after = _afterLogin;
+      closeModal(true);
       updateNavAuth();
       const redirect = sessionStorage.getItem('agora_redirect');
       if (redirect) {
@@ -425,11 +428,11 @@
         location.href = redirect + '.html';
         return;
       }
-      if (_afterLogin) { _afterLogin(); _afterLogin = null; }
+      if (after) { _afterLogin = null; after(); }
     }
 
-    function signOut() {
-      localStorage.removeItem('agora_user');
+    async function signOut() {
+      await AgoraStore.signOutAccount();
       updateNavAuth();
     }
 
@@ -437,7 +440,8 @@
       const user = localStorage.getItem('agora_user');
       const navCta = document.getElementById('nav-cta');
       if (user) {
-        navCta.innerHTML = `<a class="nav-user" href="profile.html">@${user}</a>
+        const href = AgoraStore.profileUrl(user);
+        navCta.innerHTML = `<a class="nav-user" href="${href}">@${user}</a>
           <button class="btn btn-outline" onclick="signOut()">Sign Out</button>`;
       } else {
         navCta.innerHTML = `
@@ -468,8 +472,13 @@
     document.getElementById('signup-email').addEventListener('keydown',    e => { if (e.key === 'Enter') document.getElementById('signup-password').focus(); });
     document.getElementById('signup-password').addEventListener('keydown', e => { if (e.key === 'Enter') doSignUp(); });
 
-    updateNavAuth();
-    renderDebates();
+    async function initPage() {
+      await AgoraStore.syncAuthUser();
+      updateNavAuth();
+      renderDebates();
+    }
+
+    initPage();
   </script>
 
 </body>

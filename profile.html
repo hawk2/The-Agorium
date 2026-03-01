@@ -163,6 +163,12 @@
   <div class="profile-body">
     <div class="fields-grid" id="fields-grid">
 
+      <div class="field-card full-width">
+        <div class="field-key"><span class="field-key-icon">📝</span> Public Bio</div>
+        <div class="field-value" id="view-bio"></div>
+        <textarea class="field-textarea" id="edit-bio" placeholder="Write a short public bio others can read on your profile." maxlength="1200" style="display:none;"></textarea>
+      </div>
+
       <div class="field-card">
         <div class="field-key"><span class="field-key-icon">💬</span> Tagline</div>
         <div class="field-value" id="view-tagline"></div>
@@ -204,78 +210,41 @@
 
   <div class="toast" id="toast"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="store.js"></script>
   <script>
-    // ── AUTH GATE ──
-    const currentUser = localStorage.getItem('agora_user');
-    if (!currentUser) {
-      sessionStorage.setItem('agora_redirect', 'profile');
-      location.replace('debates.html');
-    }
+    let loggedInUser = localStorage.getItem('agora_user');
+    const requestedUser = (new URLSearchParams(location.search).get('u') || '').trim();
+    let viewedUser = requestedUser || (loggedInUser || '').trim();
+    let isOwnProfile = !!loggedInUser && !!viewedUser && loggedInUser.toLowerCase() === viewedUser.toLowerCase();
+    const editableFields = ['bio', 'tagline', 'occupation', 'goals', 'belief', 'hobbies'];
 
-    // ── ACCOUNT HELPERS ──
-    function getAccounts() {
-      try { return JSON.parse(localStorage.getItem('agora_accounts') || '{}'); } catch { return {}; }
-    }
-    function saveAccounts(obj) { localStorage.setItem('agora_accounts', JSON.stringify(obj)); }
+    let editing = false;
+    let profile = {
+      username: viewedUser || 'Unknown',
+      bio: '',
+      tagline: '',
+      occupation: '',
+      goals: '',
+      belief: '',
+      hobbies: '',
+      createdat: '',
+    };
 
-    function getProfile() {
-      const accts = getAccounts();
-      return accts[currentUser.toLowerCase()] || {};
-    }
-
-    function saveProfileData(fields) {
-      const accts = getAccounts();
-      const key   = currentUser.toLowerCase();
-      accts[key]  = Object.assign(accts[key] || {}, fields);
-      saveAccounts(accts);
-    }
-
-    // ── RENDER ──
-    function renderProfile() {
-      const p = getProfile();
-
-      // Avatar: first letter of username
-      document.getElementById('avatar').textContent = currentUser.charAt(0).toUpperCase();
-      document.getElementById('display-username').textContent = p.username || currentUser;
-
-      // Tagline in hero
-      const taglineEl = document.getElementById('display-tagline');
-      taglineEl.textContent = p.tagline || '';
-      taglineEl.style.display = p.tagline ? 'block' : 'none';
-
-      // Joined
-      const joinedEl = document.getElementById('display-joined');
-      if (p.joinedAt) {
-        const d = new Date(p.joinedAt);
-        joinedEl.textContent = 'Joined ' + d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      } else {
-        joinedEl.textContent = '';
+    function getLegacyJoinedAt(username) {
+      try {
+        const accts = JSON.parse(localStorage.getItem('agora_accounts') || '{}');
+        return accts[String(username || '').toLowerCase()]?.joinedAt || '';
+      } catch {
+        return '';
       }
-
-      // Nav
-      const navCta = document.getElementById('nav-cta');
-      navCta.innerHTML = `<a class="nav-user" href="profile.html">@${currentUser}</a>
-        <button class="btn btn-outline" onclick="localStorage.removeItem('agora_user'); location.href='debates.html'">Sign Out</button>`;
-
-      // Field views
-      setView('view-tagline',    p.tagline,    'A short line that defines you...');
-      setView('view-occupation', p.occupation, 'Not set');
-      setView('view-goals',      p.goals,      'Not set');
-      setView('view-belief',     p.belief,     'Not set');
-      setView('view-hobbies',    p.hobbies,    'Not set');
-
-      // Field inputs (pre-fill for edit mode)
-      setValue('edit-tagline',    p.tagline);
-      setValue('edit-occupation', p.occupation);
-      setValue('edit-goals',      p.goals);
-      setValue('edit-belief',     p.belief);
-      setValue('edit-hobbies',    p.hobbies);
     }
 
     function setView(id, val, placeholder) {
       const el = document.getElementById(id);
-      if (val && val.trim()) {
-        el.textContent = val;
+      if (!el) return;
+      if (val && String(val).trim()) {
+        el.textContent = String(val);
         el.classList.remove('empty');
       } else {
         el.textContent = placeholder;
@@ -288,45 +257,91 @@
       if (el) el.value = val || '';
     }
 
-    // ── EDIT / SAVE / CANCEL ──
-    let editing = false;
+    function setEditMode(on) {
+      editableFields.forEach((f) => {
+        const viewEl = document.getElementById('view-' + f);
+        const editEl = document.getElementById('edit-' + f);
+        if (viewEl) viewEl.style.display = on ? 'none' : 'block';
+        if (editEl) editEl.style.display = on ? 'block' : 'none';
+      });
+      document.getElementById('save-row').classList.toggle('show', on && isOwnProfile);
+      document.getElementById('edit-btn').textContent = on ? 'Cancel' : 'Edit Profile';
+    }
+
+    function updateNavAuth() {
+      const navCta = document.getElementById('nav-cta');
+      if (!navCta) return;
+      if (loggedInUser) {
+        const href = AgoraStore.profileUrl(loggedInUser);
+        navCta.innerHTML = `<a class="nav-user" href="${href}">@${loggedInUser}</a>
+          <button class="btn btn-outline" onclick="signOut()">Sign Out</button>`;
+      } else {
+        navCta.innerHTML = `
+          <a class="btn btn-outline" href="debates.html">Sign In</a>
+          <a class="btn" style="background:var(--green);color:white;" href="debates.html">Join</a>`;
+      }
+    }
+
+    function renderProfile() {
+      const username = profile.username || viewedUser;
+
+      document.getElementById('avatar').textContent = username.charAt(0).toUpperCase();
+      document.getElementById('display-username').textContent = '@' + username;
+
+      const taglineEl = document.getElementById('display-tagline');
+      taglineEl.textContent = profile.tagline || '';
+      taglineEl.style.display = profile.tagline ? 'block' : 'none';
+
+      const joinedIso = profile.createdat || (isOwnProfile ? getLegacyJoinedAt(username) : '');
+      const joinedEl = document.getElementById('display-joined');
+      if (joinedIso) {
+        const d = new Date(joinedIso);
+        if (!Number.isNaN(d.getTime())) {
+          joinedEl.textContent = 'Joined ' + d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        } else {
+          joinedEl.textContent = '';
+        }
+      } else {
+        joinedEl.textContent = '';
+      }
+
+      setView('view-bio',        profile.bio,        isOwnProfile ? 'Write your public bio.' : 'No public bio yet.');
+      setView('view-tagline',    profile.tagline,    'A short line that defines you...');
+      setView('view-occupation', profile.occupation, 'Not set');
+      setView('view-goals',      profile.goals,      'Not set');
+      setView('view-belief',     profile.belief,     'Not set');
+      setView('view-hobbies',    profile.hobbies,    'Not set');
+
+      setValue('edit-bio',        profile.bio);
+      setValue('edit-tagline',    profile.tagline);
+      setValue('edit-occupation', profile.occupation);
+      setValue('edit-goals',      profile.goals);
+      setValue('edit-belief',     profile.belief);
+      setValue('edit-hobbies',    profile.hobbies);
+
+      const editBtn = document.getElementById('edit-btn');
+      editBtn.style.display = isOwnProfile ? 'inline-block' : 'none';
+      if (!isOwnProfile) setEditMode(false);
+    }
 
     function toggleEdit() {
+      if (!isOwnProfile) return;
       if (editing) { cancelEdit(); return; }
       editing = true;
-
-      // Swap views → inputs
-      ['tagline','occupation','goals','belief','hobbies'].forEach(f => {
-        document.getElementById('view-' + f).style.display = 'none';
-        document.getElementById('edit-' + f).style.display = 'block';
-      });
-
-      document.getElementById('save-row').classList.add('show');
-      document.getElementById('edit-btn').textContent = 'Cancel';
-      document.getElementById('edit-tagline').focus();
+      setEditMode(true);
+      document.getElementById('edit-bio').focus();
     }
 
     function cancelEdit() {
       editing = false;
-      // Restore inputs with saved values and swap back
-      const p = getProfile();
-      setValue('edit-tagline',    p.tagline);
-      setValue('edit-occupation', p.occupation);
-      setValue('edit-goals',      p.goals);
-      setValue('edit-belief',     p.belief);
-      setValue('edit-hobbies',    p.hobbies);
-
-      ['tagline','occupation','goals','belief','hobbies'].forEach(f => {
-        document.getElementById('view-' + f).style.display = 'block';
-        document.getElementById('edit-' + f).style.display = 'none';
-      });
-
-      document.getElementById('save-row').classList.remove('show');
-      document.getElementById('edit-btn').textContent = 'Edit Profile';
+      renderProfile();
+      setEditMode(false);
     }
 
-    function saveProfile() {
+    async function saveProfile() {
+      if (!isOwnProfile || !loggedInUser) return;
       const fields = {
+        bio:        document.getElementById('edit-bio').value.trim(),
         tagline:    document.getElementById('edit-tagline').value.trim(),
         occupation: document.getElementById('edit-occupation').value.trim(),
         goals:      document.getElementById('edit-goals').value.trim(),
@@ -334,31 +349,29 @@
         hobbies:    document.getElementById('edit-hobbies').value.trim(),
       };
 
-      saveProfileData(fields);
+      const editBtn = document.getElementById('edit-btn');
+      editBtn.classList.add('saving');
+      editBtn.disabled = true;
+      const updated = await AgoraStore.updateUserProfile(loggedInUser, fields);
+      editBtn.disabled = false;
+      editBtn.classList.remove('saving');
+
+      if (!updated) {
+        const msg = AgoraStore.getLastError ? AgoraStore.getLastError() : 'Could not save profile.';
+        showToast(msg || 'Could not save profile.');
+        return;
+      }
+
+      profile = updated;
       editing = false;
-
-      // Swap back to view mode
-      ['tagline','occupation','goals','belief','hobbies'].forEach(f => {
-        document.getElementById('view-' + f).style.display = 'block';
-        document.getElementById('edit-' + f).style.display = 'none';
-      });
-
-      document.getElementById('save-row').classList.remove('show');
-      document.getElementById('edit-btn').textContent = 'Edit Profile';
-
-      // Update hero tagline live
-      const taglineEl = document.getElementById('display-tagline');
-      taglineEl.textContent = fields.tagline || '';
-      taglineEl.style.display = fields.tagline ? 'block' : 'none';
-
-      // Re-render field views
-      setView('view-tagline',    fields.tagline,    'A short line that defines you...');
-      setView('view-occupation', fields.occupation, 'Not set');
-      setView('view-goals',      fields.goals,      'Not set');
-      setView('view-belief',     fields.belief,     'Not set');
-      setView('view-hobbies',    fields.hobbies,    'Not set');
-
+      renderProfile();
+      setEditMode(false);
       showToast('Profile saved ✦');
+    }
+
+    async function signOut() {
+      await AgoraStore.signOutAccount();
+      location.href = 'debates.html';
     }
 
     function showToast(msg) {
@@ -368,7 +381,23 @@
       setTimeout(() => t.classList.remove('show'), 2800);
     }
 
-    renderProfile();
+    async function loadProfile() {
+      loggedInUser = loggedInUser || await AgoraStore.syncAuthUser();
+      viewedUser = requestedUser || (loggedInUser || '').trim();
+      isOwnProfile = !!loggedInUser && !!viewedUser && loggedInUser.toLowerCase() === viewedUser.toLowerCase();
+      if (!viewedUser) { location.replace('debates.html'); return; }
+
+      updateNavAuth();
+      if (isOwnProfile) {
+        await AgoraStore.ensureUserProfile(loggedInUser, {}, { silent: true });
+      }
+      const fetched = await AgoraStore.getUserProfile(viewedUser);
+      if (fetched) profile = fetched;
+      else profile = Object.assign({}, profile, { username: viewedUser });
+      renderProfile();
+    }
+
+    loadProfile();
   </script>
 
 </body>
