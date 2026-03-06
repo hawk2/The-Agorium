@@ -164,7 +164,10 @@
     <div class="fields-grid" id="fields-grid">
 
       <div class="field-card full-width">
-        <div class="field-key"><span class="field-key-icon">📝</span> Public Bio</div>
+        <div class="field-key" style="justify-content:space-between;">
+          <span><span class="field-key-icon">📝</span> Public Bio</span>
+          <button id="clear-bio-btn" onclick="clearBio()" style="display:none; font-family:'Cinzel',serif; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; background:none; border:none; color:#bbb; cursor:pointer; padding:0; transition:color 0.15s;" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='#bbb'">Clear Bio</button>
+        </div>
         <div class="field-value" id="view-bio"></div>
         <textarea class="field-textarea" id="edit-bio" placeholder="Write a short public bio others can read on your profile." maxlength="1200" style="display:none;"></textarea>
       </div>
@@ -206,6 +209,14 @@
       <button class="save-btn"   onclick="saveProfile()">Save Changes ✦</button>
       <button class="cancel-btn" onclick="cancelEdit()">Cancel</button>
     </div>
+  </div>
+
+  <!-- 404 STATE -->
+  <div id="not-found" style="display:none; text-align:center; padding:120px 24px 80px; max-width:560px; margin:0 auto;">
+    <div style="font-size:56px; margin-bottom:20px;">🔍</div>
+    <h2 style="font-family:'Cinzel',serif; font-size:28px; color:var(--navy); margin-bottom:12px;">User not found.</h2>
+    <p style="font-size:17px; color:#888; line-height:1.6; margin-bottom:32px;">There's no Agorium account with that username. They may have changed their name or the link may be wrong.</p>
+    <a href="debates.html" style="font-family:'Cinzel',serif; font-size:14px; letter-spacing:0.1em; padding:14px 36px; background:var(--navy); color:white; border:none; border-radius:2px; text-decoration:none; display:inline-block; transition:all 0.2s;" onmouseover="this.style.background='#1e3a5f'" onmouseout="this.style.background='var(--navy)'">Back to Debates</a>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -257,6 +268,10 @@
       if (el) el.value = val || '';
     }
 
+    function clearBio() {
+      document.getElementById('edit-bio').value = '';
+    }
+
     function setEditMode(on) {
       editableFields.forEach((f) => {
         const viewEl = document.getElementById('view-' + f);
@@ -264,6 +279,8 @@
         if (viewEl) viewEl.style.display = on ? 'none' : 'block';
         if (editEl) editEl.style.display = on ? 'block' : 'none';
       });
+      const clearBioBtn = document.getElementById('clear-bio-btn');
+      if (clearBioBtn) clearBioBtn.style.display = (on && isOwnProfile) ? 'inline' : 'none';
       document.getElementById('save-row').classList.toggle('show', on && isOwnProfile);
       document.getElementById('edit-btn').textContent = on ? 'Cancel' : 'Edit Profile';
     }
@@ -393,9 +410,19 @@
         await AgoraStore.ensureUserProfile(loggedInUser, {}, { silent: true });
       }
       const fetched = await AgoraStore.getUserProfile(viewedUser);
-      if (fetched) profile = fetched;
-      else profile = Object.assign({}, profile, { username: viewedUser });
-      renderProfile();
+      if (fetched) {
+        profile = fetched;
+        renderProfile();
+      } else if (isOwnProfile) {
+        // Own profile — just hasn't been created yet, render empty
+        profile = Object.assign({}, profile, { username: viewedUser });
+        renderProfile();
+      } else {
+        // Someone else's username that doesn't exist — show 404
+        document.querySelector('.profile-hero').style.display = 'none';
+        document.querySelector('.profile-body').style.display = 'none';
+        document.getElementById('not-found').style.display = 'block';
+      }
     }
 
     loadProfile();

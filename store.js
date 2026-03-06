@@ -58,6 +58,13 @@
     return 'profile.html?u=' + encodeURIComponent(normalizeUsername(username));
   }
 
+  function buildEmailConfirmRedirectUrl() {
+    const url = new URL('auth.html', window.location.href);
+    url.searchParams.set('mode', 'signin');
+    url.searchParams.set('confirmed', '1');
+    return url.toString();
+  }
+
   function sanitizeProfileFields(fields) {
     const maxByField = {
       bio: 1200,
@@ -170,7 +177,10 @@
     const { data, error } = await db.auth.signUp({
       email: emailNorm,
       password,
-      options: { data: { username: name } },
+      options: {
+        data: { username: name },
+        emailRedirectTo: buildEmailConfirmRedirectUrl(),
+      },
     });
     if (error) {
       setLastError('signUp failed', error);
@@ -182,8 +192,20 @@
     const authName = getUsernameFromAuthUser(authUser) || name;
     if (hasSession) localStorage.setItem('agora_user', authName);
 
-    // Best effort: profile row for public profile pages.
-    await ensureUserProfile(authName, {}, { silent: true });
+    // Insert (not upsert) profile row — fails on conflict to prevent race condition
+    // where two signups grab the same username between the check and auth.signUp.
+    const { error: profileErr } = await db
+      .from('users')
+      .insert([{ username_lc: usernameKey(authName), username: authName }]);
+    if (profileErr && profileErr.code === '23505') {
+      // username_lc PK conflict — username was taken between check and insert
+      setLastError('signUp failed', { message: 'That username is already taken.' });
+      return { ok: false, error: lastError, code: 'username_taken' };
+    }
+    if (profileErr) {
+      // Non-conflict error — log but don't block signup
+      console.error('signUp profile insert:', profileErr);
+    }
 
     return {
       ok: true,
@@ -279,11 +301,14 @@
       }
     }
 
-    // Opening argument
-    if (openingArgument && openingArgument.trim()) {
+    // For debates: always create an opening 'For' argument so the creator is
+    // counted in the forcount and appears in the thread. Body is the explicit
+    // opening argument if provided, otherwise the post body (the thesis).
+    if (post.type === 'debate') {
+      const argBody = (openingArgument && openingArgument.trim()) ? openingArgument.trim() : post.body;
       const openingArg = await createArgument(post.id, {
-        side:   position === 'for' || position === 'against' ? position : 'for',
-        body:   openingArgument,
+        side:   'for',
+        body:   argBody,
         author: post.author,
       });
       if (!openingArg && !lastError) {
@@ -296,7 +321,10 @@
 
   async function getPost(id) {
     const { data, error } = await db.from('posts').select('*').eq('id', id).single();
-    if (error) return null;
+    if (error) {
+      console.error('getPost:', error.message);
+      return null;
+    }
     return data;
   }
 
@@ -423,16 +451,28 @@
   // ── MIND CHANGE ──
 
   async function declareMindChange(postId, text) {
-    await db.from('mindchanges').insert([{
+    setLastError('', null);
+    const { error: insertErr } = await db.from('mindchanges').insert([{
       id:        uid(),
       postid:    postId,
       text,
       createdat: new Date().toISOString(),
     }]);
+    if (insertErr) {
+      setLastError('declareMindChange insert failed', insertErr);
+      console.error('declareMindChange insert:', insertErr);
+      return false;
+    }
     const post = await getPost(postId);
     if (post) {
-      await db.from('posts').update({ mindchanges: (post.mindchanges || 0) + 1 }).eq('id', postId);
+      const { error: updateErr } = await db.from('posts').update({ mindchanges: (post.mindchanges || 0) + 1 }).eq('id', postId);
+      if (updateErr) {
+        setLastError('declareMindChange update failed', updateErr);
+        console.error('declareMindChange update:', updateErr);
+        return false;
+      }
     }
+    return true;
   }
 
   // ── CURRENT POST — stays in localStorage (cross-page navigation only) ──
@@ -482,13 +522,16 @@
         <div style="font-family:'Cinzel',serif;font-size:17px;font-weight:600;color:var(--navy);line-height:1.3;margin-bottom:10px;">${escHtml(post.title)}</div>
         <div style="font-size:14px;color:#777;line-height:1.6;margin-bottom:18px;">${escHtml(post.body.slice(0, 140))}${post.body.length > 140 ? '…' : ''}</div>
         <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(0,0,0,0.06);padding-top:14px;font-size:13px;flex-wrap:wrap;gap:8px;">
-          <div style="display:flex;gap:8px;">
+          <div style="display:flex;gap:8px;align-items:center;">
             ${post.type === 'debate' ? `
               <span style="font-family:'Cinzel',serif;font-size:10px;padding:3px 10px;border-radius:20px;background:rgba(53,143,101,0.1);color:var(--green);">${post.forcount || 0} For</span>
               <span style="font-family:'Cinzel',serif;font-size:10px;padding:3px 10px;border-radius:20px;background:rgba(164,22,35,0.08);color:var(--red);">${post.againstcount || 0} Against</span>
             ` : `<span style="color:#aaa;">${post.argcount || 0} ${post.argcount === 1 ? 'reply' : 'replies'}</span>`}
           </div>
-          <span style="color:#bbb;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.05em;">${timeAgo(post.createdat)}</span>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <a href="${profileUrl(post.author || '')}" onclick="event.stopPropagation()" style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.05em;color:var(--navy);text-decoration:none;opacity:0.7;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'">@${escHtml(post.author || 'unknown')}</a>
+            <span style="color:#bbb;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.05em;">${timeAgo(post.createdat)}</span>
+          </div>
         </div>
       </a>`;
   }
@@ -515,12 +558,12 @@
         if (match) {
           const qAttr = escHtml(match[1]);
           const qText = escHtml(match[2]);
-          const rText = escHtml(replyPart).replace(/\n/g, '<br>');
+          const rText = replyPart ? parseMarkdown(replyPart) : '';
           return '<div class="quote-block"><span class="quote-attr">' + qAttr + ' said:</span>' + qText + '</div>' +
                  (rText ? '<p class="arg-body">' + rText + '</p>' : '');
         }
       }
-      return '<p class="arg-body">' + bodyEsc.replace(/\n/g, '<br>') + '</p>';
+      return '<p class="arg-body">' + parseMarkdown(arg.body || '') + '</p>';
     })();
 
     return `
@@ -537,7 +580,7 @@
         </div>
         ${bodyHtml}
         <div class="arg-footer">
-          <button class="arg-action quote-btn" onclick="quoteArg('${arg.id}', '${escHtml(authorName).replace(/'/g, "\\'")}')">❝ Quote</button>
+          <button class="arg-action quote-btn" onclick="quoteArg('${escJsAttr(arg.id)}', '${escJsAttr(authorName)}')">❝ Quote</button>
           <button class="arg-action report-btn" onclick="openReport('${arg.id}')">⚑ Report</button>
           <div class="arg-votes">
             <button class="vote-btn up ${v.userVote === 'up' ? 'active-up' : ''}"
@@ -555,7 +598,27 @@
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // Escape a string for use inside inline JS in HTML attributes (onclick, etc.)
+  // Backslash-escapes quotes so the value is safe inside JS string literals.
+  function escJsAttr(str) {
+    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+  }
+
+  // Simple inline Markdown renderer.
+  // Input must be pre-escaped with escHtml — patterns match only on escaped text.
+  // Supported: **bold**, *italic*, _italic_, ~~strikethrough~~, newlines → <br>
+  function parseMarkdown(rawStr) {
+    let s = escHtml(rawStr);
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/~~(.+?)~~/g, '<s>$1</s>');
+    s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    s = s.replace(/_(.+?)_/g, '<em>$1</em>');
+    s = s.replace(/\n/g, '<br>');
+    return s;
   }
 
   // ── PUBLIC API ──
@@ -571,7 +634,7 @@
     ensureUserProfile, getUserProfile, updateUserProfile, profileUrl,
     getLastError: () => lastError,
     renderPostCard, renderArgCard,
-    timeAgo, escHtml,
+    timeAgo, escHtml, escJsAttr, parseMarkdown,
   };
 
   console.log('AgoraStore ready (Supabase)');

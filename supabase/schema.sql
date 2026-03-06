@@ -47,6 +47,9 @@ create table if not exists public.mindchanges (
   createdat timestamptz not null default now()
 );
 
+-- username_lc is the PK (unique + not null).
+-- signUpAccount uses INSERT (not upsert) so a race between two signups
+-- for the same username will fail with a 23505 PK conflict on the loser.
 create table if not exists public.users (
   username_lc text primary key,
   username text not null,

@@ -167,14 +167,6 @@
     .debate-fields { display: none; }
     .debate-fields.show { display: block; }
 
-    /* POSITION (optional for debates) */
-    .position-toggle { display: flex; gap: 0; border: 1px solid rgba(46,80,119,0.2); border-radius: 3px; overflow: hidden; }
-    .pos-opt { flex: 1; padding: 11px; font-family: 'Cinzel', serif; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; text-align: center; cursor: pointer; background: white; border: none; border-right: 1px solid rgba(46,80,119,0.15); transition: all 0.2s; color: #aaa; }
-    .pos-opt:last-child { border-right: none; }
-    .pos-opt:hover { color: var(--navy); background: rgba(46,80,119,0.03); }
-    .pos-opt.for.selected { background: var(--green); color: white; }
-    .pos-opt.undecided.selected { background: var(--navy); color: white; }
-    .pos-opt.against.selected { background: var(--red); color: white; }
     .optional-badge { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.1em; color: #bbb; margin-left: 6px; }
 
     /* CONFIDENCE */
@@ -324,15 +316,8 @@
         <p style="font-family:'Cinzel',serif; font-size:11px; letter-spacing:0.2em; text-transform:uppercase; color:var(--red); margin-bottom:24px;">Debate Settings</p>
 
         <div class="field-group">
-          <label class="field-label">Your Position <span class="optional-badge">(optional)</span></label>
-
-          <div id="for-auto-note" style="display:none; background:rgba(53,143,101,0.08); border:1px solid rgba(53,143,101,0.25); border-radius:3px; padding:10px 14px; font-family:'Cinzel',serif; font-size:11px; letter-spacing:0.1em; color:var(--green); margin-bottom:12px;">✦ You are automatically For your thesis. Others may argue either side.</div>
-          <div class="position-toggle" style="display:none;">
-            <button class="pos-opt for" onclick="selectPosition('for', this)">For</button>
-            <button class="pos-opt undecided" onclick="selectPosition('undecided', this)">Undecided</button>
-            <button class="pos-opt against" onclick="selectPosition('against', this)">Against</button>
-            <button class="pos-opt" onclick="selectPosition('none', this)" style="color:#aaa;">No Position</button>
-          </div>
+          <label class="field-label">Your Position</label>
+          <div id="for-auto-note" style="display:none; background:rgba(53,143,101,0.08); border:1px solid rgba(53,143,101,0.25); border-radius:3px; padding:10px 14px; font-family:'Cinzel',serif; font-size:11px; letter-spacing:0.1em; color:var(--green);">✦ You are automatically For your thesis. Others may argue either side.</div>
         </div>
 
         <div id="confidence-block" style="display:none;">
@@ -404,7 +389,6 @@
     }
 
     let selectedType = '';
-    let selectedPosition = 'none';
     let tags = [];
 
     // Load tags async — populates the autocomplete as soon as Supabase responds
@@ -468,8 +452,7 @@
       const debateFields = document.getElementById('debate-fields');
       if (type === 'debate') {
         debateFields.classList.add('show');
-        // Auto-select For — you are always For your thesis
-        selectedPosition = 'for';
+        // You are always For your own thesis
         document.getElementById('confidence-block').style.display = 'block';
         document.getElementById('for-auto-note').style.display = 'block';
       } else {
@@ -486,14 +469,6 @@
     }
 
 
-
-    function selectPosition(pos, btn) {
-      selectedPosition = pos;
-      document.querySelectorAll('.pos-opt').forEach(b => b.classList.remove('selected'));
-      btn.classList.add('selected');
-      const confBlock = document.getElementById('confidence-block');
-      confBlock.style.display = (pos !== 'none') ? 'block' : 'none';
-    }
 
     function updateConf(slider) {
       document.getElementById('conf-val').textContent = slider.value + '%';

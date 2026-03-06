@@ -272,6 +272,7 @@
   <script>
     const params = new URLSearchParams(location.search);
     const startMode = params.get('mode') === 'signup' ? 'signup' : 'signin';
+    const justConfirmed = params.get('confirmed') === '1';
 
     function normalizeRedirect(input) {
       let v = String(input || '').trim();
@@ -403,16 +404,22 @@
       document.getElementById('back-link').href = cancel;
       document.getElementById('cancel-link-signin').href = cancel;
       document.getElementById('cancel-link-signup').href = cancel;
-      switchTab(startMode);
+      const initialMode = justConfirmed ? 'signin' : startMode;
+      switchTab(initialMode);
 
-      const user = localStorage.getItem('agora_user') || await AgoraStore.syncAuthUser();
-      if (user) {
-        location.replace(redirectTarget);
-        return;
+      if (justConfirmed) {
+        await AgoraStore.signOutAccount();
+        showGlobal('signin-error', 'Email confirmed. Please sign in.');
+      } else {
+        const user = localStorage.getItem('agora_user') || await AgoraStore.syncAuthUser();
+        if (user) {
+          location.replace(redirectTarget);
+          return;
+        }
       }
 
       setTimeout(() => {
-        const focusEl = startMode === 'signup'
+        const focusEl = initialMode === 'signup'
           ? document.getElementById('signup-username')
           : document.getElementById('signin-email');
         if (focusEl) focusEl.focus();

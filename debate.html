@@ -293,6 +293,28 @@
     }
     .compose-textarea:focus { border-color: var(--navy); background: white; height: 80px; }
 
+    .format-toolbar {
+      display: none;
+      gap: 4px;
+      margin-bottom: 6px;
+    }
+    .compose-bar:focus-within .format-toolbar { display: flex; }
+    .fmt-btn {
+      font-family: 'EB Garamond', serif;
+      font-size: 14px;
+      padding: 3px 10px;
+      border: 1px solid rgba(46,80,119,0.18);
+      border-radius: 3px;
+      background: white;
+      color: var(--navy);
+      cursor: pointer;
+      line-height: 1.4;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .fmt-btn:hover { background: rgba(46,80,119,0.06); border-color: var(--navy); }
+    .fmt-italic { font-style: italic; }
+    .fmt-strike { text-decoration: line-through; }
+
     .compose-right {
       display: flex;
       flex-direction: column;
@@ -597,11 +619,16 @@
       <span id="quote-preview-text"></span>
       <button class="quote-clear" onclick="clearQuote()">✕</button>
     </div>
+    <div class="format-toolbar" id="format-toolbar">
+      <button type="button" class="fmt-btn" onclick="fmt('bold')" title="Bold"><strong>B</strong></button>
+      <button type="button" class="fmt-btn fmt-italic" onclick="fmt('italic')" title="Italic"><em>I</em></button>
+      <button type="button" class="fmt-btn fmt-strike" onclick="fmt('strike')" title="Strikethrough"><s>S</s></button>
+    </div>
     <div class="compose-row">
       <textarea
         class="compose-textarea"
         id="post-textarea"
-        placeholder="Make your argument. Be precise."
+        placeholder="Make your argument. Be precise. Use **bold**, *italic*, ~~strikethrough~~."
         oninput="updateCount()"
       ></textarea>
       <div class="compose-right">
@@ -804,7 +831,7 @@
       document.getElementById('post-type-label').textContent = typeLabel;
       document.title = 'The Agorium — ' + currentPost.title;
       document.getElementById('post-title').textContent = currentPost.title;
-      document.getElementById('post-body').textContent = currentPost.body;
+      document.getElementById('post-body').innerHTML = AgoraStore.parseMarkdown(currentPost.body);
 
       if (currentPost.tags && currentPost.tags.length) {
         document.getElementById('header-tags').innerHTML =
@@ -859,6 +886,22 @@
     }
 
     // ── COMPOSE ──
+
+    // Wrap selected text (or insert markers) in the compose textarea
+    function fmt(type) {
+      const ta = document.getElementById('post-textarea');
+      const start = ta.selectionStart;
+      const end   = ta.selectionEnd;
+      const sel   = ta.value.slice(start, end);
+      const markers = { bold: '**', italic: '*', strike: '~~' };
+      const m = markers[type];
+      const wrapped = sel ? m + sel + m : m + m;
+      ta.value = ta.value.slice(0, start) + wrapped + ta.value.slice(end);
+      const cursor = sel ? start + wrapped.length : start + m.length;
+      ta.setSelectionRange(cursor, cursor);
+      ta.focus();
+      updateCount();
+    }
 
     function updateCount() {
       const ta = document.getElementById('post-textarea');

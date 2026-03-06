@@ -188,12 +188,38 @@
     </div>
   </section>
 
+  <!-- RECENT DEBATES -->
+  <section class="debates-section" id="recent-debates" style="display:none;">
+    <div class="section-header">
+      <div>
+        <p class="section-label">Live Now</p>
+        <h2 class="section-title">Recent Debates</h2>
+      </div>
+      <a href="debates.html" class="new-debate-btn">View All →</a>
+    </div>
+    <div class="debates-grid" id="debates-grid"></div>
+  </section>
+
   <!-- CTA -->
   <section class="cta-section">
     <h2>Ready to Enter the Agora?</h2>
     <p>Bring your convictions. Bring your doubts. Leave with something sharper.</p>
     <a href="debates.html" class="btn-cta">Enter the Debates</a>
   </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="store.js"></script>
+  <script>
+    (async function() {
+      const posts = await AgoraStore.getAllPosts();
+      if (posts.length) {
+        const section = document.getElementById('recent-debates');
+        const grid = document.getElementById('debates-grid');
+        grid.innerHTML = posts.slice(0, 6).map(p => AgoraStore.renderPostCard(p)).join('');
+        section.style.display = 'block';
+      }
+    })();
+  </script>
 
   <footer>
     <div>
