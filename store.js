@@ -507,8 +507,9 @@
       `<span style="font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.08em;padding:3px 8px;border-radius:2px;background:rgba(46,80,119,0.08);color:var(--navy);">${tag}</span>`
     ).join('');
 
+    const body = post.body || '';
     return `
-      <a class="post-card" href="debate.html" onclick="AgoraStore.setCurrentPost('${post.id}')" style="
+      <div class="post-card" onclick="AgoraStore.setCurrentPost('${post.id}');location.href='debate.html'" style="
         display:block; text-decoration:none; color:inherit;
         background:white; border:1px solid rgba(46,80,119,0.12);
         border-left:4px solid ${t.border}; border-radius:3px;
@@ -520,7 +521,7 @@
           ${tagHtml}
         </div>
         <div style="font-family:'Cinzel',serif;font-size:17px;font-weight:600;color:var(--navy);line-height:1.3;margin-bottom:10px;">${escHtml(post.title)}</div>
-        <div style="font-size:14px;color:#777;line-height:1.6;margin-bottom:18px;">${escHtml(post.body.slice(0, 140))}${post.body.length > 140 ? '…' : ''}</div>
+        <div style="font-size:14px;color:#777;line-height:1.6;margin-bottom:18px;">${escHtml(body.slice(0, 140))}${body.length > 140 ? '…' : ''}</div>
         <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(0,0,0,0.06);padding-top:14px;font-size:13px;flex-wrap:wrap;gap:8px;">
           <div style="display:flex;gap:8px;align-items:center;">
             ${post.type === 'debate' ? `
@@ -533,7 +534,7 @@
             <span style="color:#bbb;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.05em;">${timeAgo(post.createdat)}</span>
           </div>
         </div>
-      </a>`;
+      </div>`;
   }
 
   // voteMap = { [argId]: { up, down, userVote } } — pre-fetched by renderThread
