@@ -1,6 +1,11 @@
 import OpenAI from "npm:openai";
 import { createClient } from "npm:@supabase/supabase-js";
 
+const MODEL = "gpt-5-mini-2025-08-07";
+const SIDES = ["for", "against"] as const;
+
+// ── Personas ─────────────────────────────────────────────────────────────────
+
 const PERSONAS = {
   RighteousPaul: {
     display_name: "RighteousPaul",
@@ -39,124 +44,148 @@ const PERSONAS = {
 
 type PersonaKey = keyof typeof PERSONAS;
 
-async function discoverTables(sb: ReturnType<typeof createClient>): Promise<string[]> {
-  const candidates = ["posts", "threads", "debates", "topics", "forum_posts", "replies", "comments", "responses", "profiles", "users"];
-  const found: string[] = [];
-  for (const t of candidates) {
-    try {
-      const { error } = await sb.from(t).select("id").limit(1);
-      if (!error) { found.push(t); console.log(`  ✓ ${t}`); }
-    } catch (_) {}
-  }
-  return found;
+// ── User helper ───────────────────────────────────────────────────────────────
+
+async function ensurePersonaUser(
+  sb: ReturnType<typeof createClient>,
+  persona: (typeof PERSONAS)[PersonaKey],
+): Promise<void> {
+  const nameLc = persona.display_name.toLowerCase();
+  const { data } = await sb.from("users").select("username_lc").eq("username_lc", nameLc).maybeSingle();
+  if (data) return;
+  const { error } = await sb.from("users").insert({
+    username_lc: nameLc,
+    username: persona.display_name,
+    bio: persona.bio,
+  });
+  if (error) console.warn(`  Could not create user ${persona.display_name}: ${error.message}`);
+  else console.log(`  Created user: ${persona.display_name}`);
 }
 
-function pickTable(tables: string[], options: string[]): string | null {
-  return options.find((t) => tables.includes(t)) ?? null;
-}
+// ── Content generation ────────────────────────────────────────────────────────
 
-async function getOrCreateProfile(sb: ReturnType<typeof createClient>, profileTable: string, persona: (typeof PERSONAS)[PersonaKey]): Promise<string | null> {
-  const { data } = await sb.from(profileTable).select("id").eq("username", persona.display_name).maybeSingle();
-  if (data?.id) return data.id;
-  const { data: created } = await sb.from(profileTable).insert({ username: persona.display_name, bio: persona.bio }).select("id").maybeSingle();
-  return created?.id ?? null;
-}
-
-async function generateReply(ai: OpenAI, persona: (typeof PERSONAS)[PersonaKey], post: Record<string, unknown>): Promise<string> {
+async function generateArgument(
+  ai: OpenAI,
+  persona: (typeof PERSONAS)[PersonaKey],
+  post: Record<string, unknown>,
+): Promise<string> {
   const title = post.title ?? "";
-  const body = post.content ?? post.body ?? post.text ?? "";
+  const body  = post.body ?? "";
   const msg = await ai.chat.completions.create({
-    model: "gpt-4o", max_tokens: 700,
+    model: MODEL,
+    max_completion_tokens: 700,
     messages: [
       { role: "system", content: persona.prompt_style },
-      { role: "user", content: `The debate you're replying to:\nTitle: ${title}\n\n${body}\n\nWrite your reply. Be 2–4 paragraphs. No markdown. Argue hard. Make a real point. Be true to your character.` },
+      {
+        role: "user",
+        content:
+          `You're arguing in this debate:\nTitle: ${title}\n\n${body}\n\n` +
+          `Write your argument. Be 2–4 paragraphs. No markdown. No headers. ` +
+          `Argue hard. Make a real point. Be true to your character.`,
+      },
     ],
   });
   return msg.choices[0].message.content!.trim();
 }
 
-async function generateNewPost(ai: OpenAI, persona: (typeof PERSONAS)[PersonaKey]): Promise<{ title: string; body: string }> {
+async function generateNewPost(
+  ai: OpenAI,
+  persona: (typeof PERSONAS)[PersonaKey],
+): Promise<{ title: string; body: string }> {
   const msg = await ai.chat.completions.create({
-    model: "gpt-4o", max_tokens: 700,
+    model: MODEL,
+    max_completion_tokens: 700,
     messages: [
       { role: "system", content: persona.prompt_style },
-      { role: "user", content: `Start a brand-new debate on a topic you genuinely care about. Pick something political, ethical, or social — real and contentious. Format: first line is the TITLE only, blank line, then 2–4 paragraphs. No markdown. Be opinionated.` },
+      {
+        role: "user",
+        content:
+          `Start a brand-new debate on a topic you genuinely care about. ` +
+          `Pick something political, ethical, or social — something real and contentious. ` +
+          `Format: first line is the TITLE only (no label), blank line, then 2–4 paragraphs. ` +
+          `No markdown. Be opinionated. Don't be bland.`,
+      },
     ],
   });
   const raw = msg.choices[0].message.content!.trim();
-  const [titleLine, ...rest] = raw.split("\n");
-  return { title: titleLine.trim(), body: rest.join("\n").trim() };
+  const allLines = raw.split("\n");
+  let title = "";
+  const bodyLines: string[] = [];
+  let titleFound = false;
+  for (const line of allLines) {
+    if (!titleFound) { if (line.trim()) { title = line.trim(); titleFound = true; } }
+    else bodyLines.push(line);
+  }
+  const bodyText = bodyLines.join("\n").trim() || raw;
+  return { title: title || "A Debate Worth Having", body: bodyText };
 }
 
-async function tryInsert(sb: ReturnType<typeof createClient>, table: string, data: Record<string, unknown>): Promise<boolean> {
-  const { error } = await sb.from(table).insert(data);
-  if (error) { console.warn(`  Insert failed on ${table}: ${error.message}`); return false; }
-  return true;
-}
+// ── Entry point ───────────────────────────────────────────────────────────────
 
 Deno.serve(async (_req) => {
   try {
     console.log(`\n🤖 Agorium Bot — ${new Date().toUTCString()}`);
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const openaiKey   = Deno.env.get("OPENAI_API_KEY")!;
+
     const sb = createClient(supabaseUrl, supabaseKey);
     const ai = new OpenAI({ apiKey: openaiKey });
 
-    console.log("\nDiscovering tables...");
-    const tables = await discoverTables(sb);
-    if (!tables.length) return new Response("No tables found", { status: 500 });
-
-    const postTable    = pickTable(tables, ["posts", "threads", "debates", "topics", "forum_posts"]);
-    const replyTable   = pickTable(tables, ["replies", "comments", "responses"]);
-    const profileTable = pickTable(tables, ["profiles", "users"]);
-    if (!postTable) return new Response(`No post table. Found: ${tables.join(", ")}`, { status: 500 });
-
-    console.log(`\npost=${postTable} reply=${replyTable} profile=${profileTable}`);
-
+    // Pick persona
     const keys = Object.keys(PERSONAS) as PersonaKey[];
-    const personaKey = keys[Math.floor(Math.random() * keys.length)];
-    const persona = PERSONAS[personaKey];
+    const persona = PERSONAS[keys[Math.floor(Math.random() * keys.length)]];
     console.log(`\n🎭 Persona: ${persona.display_name}`);
 
-    let userId: string | null = null;
-    if (profileTable) {
-      userId = await getOrCreateProfile(sb, profileTable, persona);
-      console.log(`   User ID: ${userId ?? "not found"}`);
-    }
+    // Ensure user exists
+    await ensurePersonaUser(sb, persona);
 
-    const { data: posts } = await sb.from(postTable).select("*").order("created_at", { ascending: false }).limit(10);
+    // Fetch recent posts
+    const { data: posts } = await sb
+      .from("posts")
+      .select("*")
+      .order("createdat", { ascending: false })
+      .limit(10);
+
     const now = new Date().toISOString();
-    const base: Record<string, unknown> = { created_at: now };
-    if (userId) base.user_id = userId;
-
-    const fkKeys = [`${postTable.replace(/s$/, "")}_id`, "post_id", "thread_id", "parent_id", "topic_id"];
 
     if (posts?.length && Math.random() < 0.7) {
+      // 70%: argue in an existing debate
       const target = posts.slice(0, 5)[Math.floor(Math.random() * Math.min(5, posts.length))];
-      console.log(`   Action: reply to "${target.title ?? target.id}"`);
-      const content = await generateReply(ai, persona, target);
-      let posted = false;
-      if (replyTable) {
-        for (const fk of fkKeys) {
-          if (await tryInsert(sb, replyTable, { ...base, content, [fk]: target.id })) {
-            console.log(`✅ Replied to: "${target.title ?? target.id}"`); posted = true; break;
-          }
-        }
-      }
-      if (!posted) {
-        for (const fk of fkKeys) {
-          if (await tryInsert(sb, postTable, { ...base, content, title: `Re: ${target.title ?? ""}`, [fk]: target.id })) {
-            console.log(`✅ Replied (as post) to: "${target.title ?? target.id}"`); break;
-          }
-        }
-      }
+      console.log(`   Action: argue on "${target.title ?? target.id}"`);
+
+      const body = await generateArgument(ai, persona, target);
+      const side = SIDES[Math.floor(Math.random() * SIDES.length)];
+
+      const { error } = await sb.from("arguments").insert({
+        id:        crypto.randomUUID(),
+        postid:    target.id,
+        side,
+        body,
+        author:    persona.display_name,
+        createdat: now,
+      });
+
+      if (error) console.error(`❌ Failed to post argument: ${error.message}`);
+      else console.log(`✅ ${persona.display_name} argued (${side}) on: "${target.title ?? target.id}"`);
     } else {
+      // 30%: start a new debate
       console.log("   Action: new debate");
       const { title, body } = await generateNewPost(ai, persona);
-      for (const attempt of [{ ...base, content: body, title }, { ...base, content: body }, { ...base, body, title }]) {
-        if (await tryInsert(sb, postTable, attempt)) { console.log(`✅ Started: "${title}"`); break; }
-      }
+
+      const { error } = await sb.from("posts").insert({
+        id:        crypto.randomUUID(),
+        type:      "debate",
+        title,
+        body,
+        author:    persona.display_name,
+        createdat: now,
+        tags:      [],
+      });
+
+      if (error) console.error(`❌ Failed to create debate: ${error.message}`);
+      else console.log(`✅ ${persona.display_name} started: "${title}"`);
     }
 
     return new Response("✅ Done", { status: 200 });

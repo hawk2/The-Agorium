@@ -98,7 +98,7 @@
     .debate-title { font-family: 'Cinzel', serif; font-size: clamp(16px, 2.2vw, 26px); font-weight: 700; color: var(--white); line-height: 1.25; margin-bottom: 6px; flex: 1; }
     .edit-post-btn { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.1em; padding: 5px 13px; background: transparent; border: 1px solid rgba(255,255,255,0.25); color: rgba(255,255,255,0.55); border-radius: 2px; cursor: pointer; transition: all 0.18s; flex-shrink: 0; margin-top: 2px; display: none; }
     .edit-post-btn:hover { border-color: var(--blue); color: var(--blue); }
-    .debate-desc { font-size: 14px; color: rgba(255,255,255,0.5); font-style: italic; margin-bottom: 12px; }
+    .debate-desc { display: none; }
     /* edit post modal */
     .edit-post-modal { border-top-color: var(--blue) !important; }
     .edit-field-label { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--navy); display: block; margin-bottom: 6px; margin-top: 14px; }
@@ -164,6 +164,10 @@
       font-size: 15px;
       margin: auto;
     }
+    .thread-empty.after-context {
+      margin: 0;
+      padding: 18px 24px 6px;
+    }
 
     /* ── ARG CARD ── */
     .arg-card {
@@ -180,7 +184,21 @@
     .arg-card.for { border-left-color: var(--green); border-color: rgba(53,143,101,0.15); }
     .arg-card.against { border-left-color: var(--red); border-color: rgba(164,22,35,0.12); }
     .arg-card.undecided { border-left-color: var(--blue); border-color: rgba(113,169,247,0.15); }
+    .arg-card.context-card {
+      border-left-color: var(--navy);
+      border-color: rgba(46,80,119,0.16);
+      background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
+    }
     .arg-card:hover { box-shadow: 0 3px 16px rgba(0,0,0,0.07); }
+    .context-avatar { background: var(--navy); }
+    .context-note {
+      margin-left: auto;
+      font-family: 'Cinzel', serif;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #b2b9c4;
+    }
 
     .arg-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
     .arg-author { display: flex; align-items: center; gap: 8px; }
@@ -863,7 +881,7 @@
       document.getElementById('post-type-label').textContent = typeLabel;
       document.title = 'The Agorium — ' + currentPost.title;
       document.getElementById('post-title').textContent = currentPost.title;
-      document.getElementById('post-body').innerHTML = AgoraStore.parseMarkdown(currentPost.body);
+      document.getElementById('post-body').textContent = '';
 
       if (currentPost.tags && currentPost.tags.length) {
         document.getElementById('header-tags').innerHTML =
@@ -880,6 +898,39 @@
 
       await updateStats();
       await renderThread();
+    }
+
+    function renderContextCard(post) {
+      const authorName = String(post.author || 'Original Poster');
+      const authorEsc = AgoraStore.escHtml(authorName);
+      const authorHref = AgoraStore.profileUrl(authorName);
+      const initials = authorName
+        .split(' ')
+        .map(w => w[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase() || 'OP';
+      const label = post.type === 'debate' ? 'Background & Stakes' : 'Original Post';
+      const bodyHtml = AgoraStore.parseMarkdown(post.body || '');
+
+      return `
+        <div class="arg-card undecided context-card" id="context-card">
+          <div class="arg-header">
+            <div class="arg-author">
+              <div class="avatar context-avatar">${initials}</div>
+              <div class="arg-meta">
+                <a class="arg-name" href="${authorHref}" style="text-decoration:none;">${authorEsc}</a>
+                <span class="arg-time">${AgoraStore.timeAgo(post.createdat)}</span>
+              </div>
+            </div>
+            <span class="arg-side-badge badge-undecided">${label}</span>
+          </div>
+          <p class="arg-body">${bodyHtml}</p>
+          <div class="arg-footer">
+            <span class="context-note">Original post context</span>
+          </div>
+        </div>
+      `;
     }
 
     // ── STATS ──
@@ -915,13 +966,14 @@
     async function renderThread() {
       const thread = document.getElementById('thread');
       const args   = await AgoraStore.getArguments(currentPost.id);
+      const contextCard = renderContextCard(currentPost);
       if (!args.length) {
-        thread.innerHTML = '<div class="thread-empty">No arguments yet — be the first to post below.</div>';
+        thread.innerHTML = contextCard + '<div class="thread-empty after-context">No arguments yet — be the first to post below.</div>';
         return;
       }
       // Batch-fetch votes for all args in one query
       const voteMap = await AgoraStore.getVotesBatch(args.map(a => a.id));
-      thread.innerHTML = args.map(a => AgoraStore.renderArgCard(a, voteMap)).join('');
+      thread.innerHTML = contextCard + args.map(a => AgoraStore.renderArgCard(a, voteMap)).join('');
       requestAnimationFrame(() => { thread.scrollTop = thread.scrollHeight; });
 
       // If the user already has an argument in this thread, unlock position tools
