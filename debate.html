@@ -923,6 +923,15 @@
       const voteMap = await AgoraStore.getVotesBatch(args.map(a => a.id));
       thread.innerHTML = args.map(a => AgoraStore.renderArgCard(a, voteMap)).join('');
       requestAnimationFrame(() => { thread.scrollTop = thread.scrollHeight; });
+
+      // If the user already has an argument in this thread, unlock position tools
+      if (!hasPosted) {
+        const loggedInUser = localStorage.getItem('agora_user');
+        if (loggedInUser && args.some(a => (a.author || '').toLowerCase() === loggedInUser.toLowerCase())) {
+          hasPosted = true;
+          unlock();
+        }
+      }
     }
 
     // ── COMPOSE ──
