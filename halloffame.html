@@ -64,26 +64,44 @@
     .hof-section-label { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--gold); margin-bottom: 4px; }
     .hof-section-title { font-family: 'Cinzel', serif; font-size: clamp(20px, 2.5vw, 28px); font-weight: 600; color: var(--navy); line-height: 1.1; }
 
-    /* LEADERBOARD — user rankings */
-    .leaderboard { display: flex; flex-direction: column; gap: 12px; }
-    .lb-row { display: flex; align-items: center; gap: 20px; background: white; border: 1px solid rgba(46,80,119,0.1); border-radius: 3px; padding: 18px 24px; transition: all 0.2s; }
-    .lb-row:hover { transform: translateX(4px); box-shadow: 0 4px 20px rgba(46,80,119,0.08); }
-    .lb-rank { font-family: 'Cinzel', serif; font-size: 22px; font-weight: 700; min-width: 40px; text-align: center; }
-    .lb-rank.gold   { color: var(--gold); }
-    .lb-rank.silver { color: var(--silver); }
-    .lb-rank.bronze { color: var(--bronze); }
-    .lb-rank.other  { color: rgba(46,80,119,0.35); font-size: 16px; }
-    .lb-avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--navy); color: white; font-family: 'Cinzel', serif; font-size: 16px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
-    .lb-avatar img { width: 100%; height: 100%; object-fit: cover; }
-    .lb-info { flex: 1; min-width: 0; }
-    .lb-name { font-family: 'Cinzel', serif; font-size: 15px; font-weight: 600; color: var(--navy); text-decoration: none; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .lb-name:hover { color: var(--blue); }
-    .lb-sub { font-size: 13px; color: #888; }
-    .lb-stat { text-align: right; }
-    .lb-stat-num { font-family: 'Cinzel', serif; font-size: 22px; font-weight: 700; color: var(--navy); display: block; line-height: 1; }
-    .lb-stat-label { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: #aaa; margin-top: 2px; display: block; }
-    .lb-bar-wrap { flex: 1; height: 4px; background: rgba(46,80,119,0.08); border-radius: 2px; margin: 0 16px; }
-    .lb-bar { height: 4px; border-radius: 2px; background: var(--navy); transition: width 0.6s ease; }
+    /* PRIMARY SECTION — Mind Changers featured at top */
+    .hof-section.primary { margin-bottom: 80px; }
+    .hof-section.primary .hof-section-header { border-bottom: 3px solid var(--red); margin-bottom: 36px; padding-bottom: 20px; }
+    .hof-section.primary .hof-section-icon { font-size: 36px; }
+    .hof-section.primary .hof-section-label { color: var(--red); font-size: 11px; letter-spacing: 0.32em; }
+    .hof-section.primary .hof-section-title { font-size: clamp(26px, 3.5vw, 38px); }
+    .hof-section.primary .hof-grid { gap: 20px; }
+    .hof-section.primary .hof-post-card { padding: 30px; }
+    .hof-section.primary .hof-post-card.rank-1 { grid-column: 1 / -1; display: flex; gap: 28px; align-items: flex-start; }
+    .hof-section.primary .hof-post-card.rank-1 .hof-card-title { font-size: 20px; }
+    .hof-section.primary .hof-post-card.rank-1 .featured-rank { font-family: 'Cinzel', serif; font-size: 48px; font-weight: 700; color: var(--gold); line-height: 1; flex-shrink: 0; padding-top: 4px; }
+    .hof-section.primary .hof-post-card.rank-1 .featured-content { flex: 1; min-width: 0; }
+    .hof-section.primary .hof-post-card.rank-1 .hof-card-body { font-size: 15px; }
+    .hof-section.primary .hof-post-card::before { width: 5px; }
+    .hof-section.primary .hof-post-card.rank-1::before { background: var(--gold); }
+
+    /* VOTE LEADERBOARD */
+    .vote-list { display: flex; flex-direction: column; gap: 12px; }
+    .vote-row { display: flex; align-items: flex-start; gap: 20px; background: white; border: 1px solid rgba(46,80,119,0.1); border-radius: 3px; padding: 18px 24px; transition: all 0.2s; cursor: pointer; position: relative; overflow: hidden; }
+    .vote-row::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: rgba(46,80,119,0.15); }
+    .vote-row.rank-1::before { background: var(--gold); }
+    .vote-row.rank-2::before { background: var(--silver); }
+    .vote-row.rank-3::before { background: var(--bronze); }
+    .vote-row:hover { transform: translateX(4px); box-shadow: 0 4px 20px rgba(46,80,119,0.08); }
+    .vote-rank { font-family: 'Cinzel', serif; font-size: 20px; font-weight: 700; min-width: 40px; text-align: center; flex-shrink: 0; padding-top: 2px; }
+    .vote-rank.gold   { color: var(--gold); }
+    .vote-rank.silver { color: var(--silver); }
+    .vote-rank.bronze { color: var(--bronze); }
+    .vote-rank.other  { color: rgba(46,80,119,0.3); font-size: 15px; }
+    .vote-body { flex: 1; min-width: 0; }
+    .vote-quote { font-size: 15px; font-style: italic; color: #444; line-height: 1.6; margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .vote-meta { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .vote-author { font-family: 'Cinzel', serif; font-size: 11px; color: var(--navy); opacity: 0.7; text-decoration: none; }
+    .vote-author:hover { opacity: 1; }
+    .vote-on { font-size: 12px; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+    .vote-score { text-align: right; flex-shrink: 0; }
+    .vote-score-num { font-family: 'Cinzel', serif; font-size: 22px; font-weight: 700; color: var(--green); display: block; line-height: 1; }
+    .vote-score-label { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: #aaa; margin-top: 2px; display: block; }
 
     /* POST CARDS — hall of fame style */
     .hof-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
@@ -149,8 +167,9 @@
       .page-hero { padding: 48px 24px 40px; }
       .hof-main { padding: 40px 24px 60px; }
       .hof-grid { grid-template-columns: 1fr; }
+      .hof-section.primary .hof-post-card.rank-1 { flex-direction: column; gap: 12px; }
+      .hof-section.primary .hof-post-card.rank-1 .featured-rank { font-size: 32px; }
       footer { flex-direction: column; text-align: center; padding: 32px 24px; }
-      .lb-bar-wrap { display: none; }
     }
   </style>
 </head>
@@ -185,16 +204,30 @@
 
   <main class="hof-main">
 
-    <!-- TOP DEBATERS -->
-    <section class="hof-section" id="section-debaters">
+    <!-- MIND CHANGERS — PRIMARY -->
+    <section class="hof-section primary" id="section-minds">
       <div class="hof-section-header">
-        <span class="hof-section-icon">⚖️</span>
+        <span class="hof-section-icon">🧠</span>
         <div>
-          <p class="hof-section-label">Community</p>
-          <h2 class="hof-section-title">Top Debaters</h2>
+          <p class="hof-section-label">Greatest Impact</p>
+          <h2 class="hof-section-title">Mind Changers</h2>
         </div>
       </div>
-      <div class="leaderboard" id="lb-debaters">
+      <div class="hof-grid" id="grid-minds">
+        <div style="text-align:center;padding:32px;grid-column:1/-1;"><div class="loading-spinner"></div></div>
+      </div>
+    </section>
+
+    <!-- MOST UPVOTED ARGUMENTS -->
+    <section class="hof-section" id="section-upvotes">
+      <div class="hof-section-header">
+        <span class="hof-section-icon">▲</span>
+        <div>
+          <p class="hof-section-label">Arguments</p>
+          <h2 class="hof-section-title">Most Upvoted</h2>
+        </div>
+      </div>
+      <div class="vote-list" id="list-upvotes">
         <div style="text-align:center;padding:32px;"><div class="loading-spinner"></div></div>
       </div>
     </section>
@@ -209,20 +242,6 @@
         </div>
       </div>
       <div class="hof-grid" id="grid-debated">
-        <div style="text-align:center;padding:32px;grid-column:1/-1;"><div class="loading-spinner"></div></div>
-      </div>
-    </section>
-
-    <!-- MIND CHANGERS -->
-    <section class="hof-section" id="section-minds">
-      <div class="hof-section-header">
-        <span class="hof-section-icon">🧠</span>
-        <div>
-          <p class="hof-section-label">Impact</p>
-          <h2 class="hof-section-title">Mind Changers</h2>
-        </div>
-      </div>
-      <div class="hof-grid" id="grid-minds">
         <div style="text-align:center;padding:32px;grid-column:1/-1;"><div class="loading-spinner"></div></div>
       </div>
     </section>
@@ -292,66 +311,47 @@
     function rankLabel(i)  { return i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`; }
     function rankCardClass(i) { return i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : 'rank-other'; }
 
-    // ── TOP DEBATERS ──────────────────────────────────────────────────────────
-    // Score = posts authored × 3 + arguments authored × 1
-    // Fetched by loading all posts and all arguments, grouped client-side.
+    // ── MOST UPVOTED ARGUMENTS ────────────────────────────────────────────────
 
-    async function renderTopDebaters(posts, args, users) {
-      const el = document.getElementById('lb-debaters');
+    function renderMostUpvoted(args, votes, posts) {
+      const el = document.getElementById('list-upvotes');
+      const postMap = {};
+      posts.forEach(p => { postMap[p.id] = p; });
 
-      const scoreMap = {};
-      posts.forEach(p => {
-        const a = (p.author || '').toLowerCase();
-        if (!scoreMap[a]) scoreMap[a] = { username: p.author, posts: 0, args: 0 };
-        scoreMap[a].posts++;
-      });
-      args.forEach(a => {
-        const key = (a.author || '').toLowerCase();
-        if (!scoreMap[key]) scoreMap[key] = { username: a.author, posts: 0, args: 0 };
-        scoreMap[key].args++;
-      });
+      // Join votes onto args, compute net score
+      const voteMap = {};
+      votes.forEach(v => { voteMap[v.id] = v; });
 
-      const ranked = Object.values(scoreMap)
-        .map(u => ({ ...u, score: u.posts * 3 + u.args }))
-        .sort((a, b) => b.score - a.score)
+      const scored = args.map(a => {
+        const v = voteMap[a.id] || { up: 0, down: 0 };
+        return { ...a, net: (v.up || 0) - (v.down || 0), up: v.up || 0 };
+      }).filter(a => a.net > 0 || a.up > 0)
+        .sort((a, b) => b.net - a.net || b.up - a.up)
         .slice(0, 7);
 
-      if (!ranked.length) {
-        el.innerHTML = emptyHtml('No debaters yet — be the first to argue.');
+      if (!scored.length) {
+        el.innerHTML = emptyHtml('No upvoted arguments yet — cast the first vote.');
         return;
       }
 
-      const maxScore = ranked[0].score || 1;
-
-      // Build a quick lookup from the users table for avatar_url
-      const avatarMap = {};
-      (users || []).forEach(u => {
-        if (u.username) avatarMap[u.username.toLowerCase()] = u.avatar_url || '';
-      });
-
-      el.innerHTML = ranked.map((u, i) => {
-        const rc    = rankClass(i);
-        const rl    = rankLabel(i);
-        const pct   = Math.round((u.score / maxScore) * 100);
-        const href  = AgoraStore.profileUrl(u.username);
-        const initials = (u.username || '?').slice(0, 2).toUpperCase();
-        const avatar = avatarMap[(u.username || '').toLowerCase()];
-        const avatarHtml = avatar
-          ? `<img src="${AgoraStore.escHtml(avatar)}" alt="${AgoraStore.escHtml(u.username)}" />`
-          : initials;
-
+      el.innerHTML = scored.map((a, i) => {
+        const rc   = rankClass(i);
+        const rl   = rankLabel(i);
+        const post = postMap[a.postid] || null;
+        const body = (a.body || '').slice(0, 180);
         return `
-          <div class="lb-row">
-            <span class="lb-rank ${rc}">${rl}</span>
-            <div class="lb-avatar">${avatarHtml}</div>
-            <div class="lb-info">
-              <a class="lb-name" href="${href}">${AgoraStore.escHtml(u.username)}</a>
-              <span class="lb-sub">${u.posts} post${u.posts !== 1 ? 's' : ''} · ${u.args} argument${u.args !== 1 ? 's' : ''}</span>
+          <div class="vote-row ${rankCardClass(i)}" onclick="${post ? `AgoraStore.setCurrentPost('${post.id}');location.href='debate.html'` : ''}">
+            <span class="vote-rank ${rc}">${rl}</span>
+            <div class="vote-body">
+              <div class="vote-quote">"${AgoraStore.escHtml(body)}${(a.body || '').length > 180 ? '…' : ''}"</div>
+              <div class="vote-meta">
+                <a class="vote-author" href="${AgoraStore.profileUrl(a.author || '')}" onclick="event.stopPropagation()">${AgoraStore.escHtml(a.author || 'unknown')}</a>
+                ${post ? `<span class="vote-on">on: ${AgoraStore.escHtml(post.title || '')}</span>` : ''}
+              </div>
             </div>
-            <div class="lb-bar-wrap"><div class="lb-bar" style="width:${pct}%"></div></div>
-            <div class="lb-stat">
-              <span class="lb-stat-num">${u.score}</span>
-              <span class="lb-stat-label">Score</span>
+            <div class="vote-score">
+              <span class="vote-score-num">+${a.net}</span>
+              <span class="vote-score-label">Net Votes</span>
             </div>
           </div>`;
       }).join('');
@@ -403,16 +403,30 @@
       el.innerHTML = top.map((p, i) => {
         const rc   = rankClass(i);
         const rl   = rankLabel(i);
-        const body = (p.body || '').slice(0, 100);
+        const body = i === 0 ? (p.body || '').slice(0, 200) : (p.body || '').slice(0, 100);
+        const isFeatured = i === 0;
         return `
           <div class="hof-post-card ${rankCardClass(i)}" onclick="AgoraStore.setCurrentPost('${p.id}');location.href='debate.html'">
-            <div class="hof-card-rank ${rc}">${rl} &nbsp;Mind Changer</div>
-            <div class="hof-card-title">${AgoraStore.escHtml(p.title)}</div>
-            <div class="hof-card-body">${AgoraStore.escHtml(body)}${(p.body || '').length > 100 ? '…' : ''}</div>
-            <div class="hof-card-footer">
-              <a class="hof-card-author" href="${AgoraStore.profileUrl(p.author || '')}" onclick="event.stopPropagation()">${AgoraStore.escHtml(p.author || 'unknown')}</a>
-              <span class="hof-big-stat mind">🧠 ${p.mindchanges} changed</span>
-            </div>
+            ${isFeatured ? `
+              <div class="featured-rank">${rl}</div>
+              <div class="featured-content">
+                <div class="hof-card-rank ${rc}">Greatest Mind Changer</div>
+                <div class="hof-card-title">${AgoraStore.escHtml(p.title)}</div>
+                <div class="hof-card-body">${AgoraStore.escHtml(body)}${(p.body || '').length > 200 ? '…' : ''}</div>
+                <div class="hof-card-footer">
+                  <a class="hof-card-author" href="${AgoraStore.profileUrl(p.author || '')}" onclick="event.stopPropagation()">${AgoraStore.escHtml(p.author || 'unknown')}</a>
+                  <span class="hof-big-stat mind">🧠 ${p.mindchanges} mind${p.mindchanges !== 1 ? 's' : ''} changed</span>
+                </div>
+              </div>
+            ` : `
+              <div class="hof-card-rank ${rc}">${rl} &nbsp;Mind Changer</div>
+              <div class="hof-card-title">${AgoraStore.escHtml(p.title)}</div>
+              <div class="hof-card-body">${AgoraStore.escHtml(body)}${(p.body || '').length > 100 ? '…' : ''}</div>
+              <div class="hof-card-footer">
+                <a class="hof-card-author" href="${AgoraStore.profileUrl(p.author || '')}" onclick="event.stopPropagation()">${AgoraStore.escHtml(p.author || 'unknown')}</a>
+                <span class="hof-big-stat mind">🧠 ${p.mindchanges} changed</span>
+              </div>
+            `}
           </div>`;
       }).join('');
     }
@@ -472,11 +486,11 @@
       return data || [];
     }
 
-    async function getAllUsers() {
+    async function getAllVotes() {
       const SUPABASE_URL = 'https://auboquhnqswseneeosyj.supabase.co';
       const SUPABASE_KEY = 'sb_publishable_j13mrxvpNWC12QhJFSVPYQ_Q-kdsL0s';
       const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-      const { data } = await client.from('users').select('username, avatar_url');
+      const { data } = await client.from('votes').select('id, up, down');
       return data || [];
     }
 
@@ -485,15 +499,15 @@
       updateNavAuth();
 
       // Fetch all data in parallel
-      const [posts, args, users] = await Promise.all([
+      const [posts, args, votes] = await Promise.all([
         AgoraStore.getAllPosts(),
         getAllArguments(),
-        getAllUsers(),
+        getAllVotes(),
       ]);
 
-      renderTopDebaters(posts, args, users);
-      renderMostDebated(posts);
       renderMindChangers(posts);
+      renderMostUpvoted(args, votes, posts);
+      renderMostDebated(posts);
       renderSteelChampions(args, posts);
     }
 
