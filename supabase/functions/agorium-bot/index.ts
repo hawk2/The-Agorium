@@ -841,17 +841,38 @@ Deno.serve(async (req) => {
     console.log(`\n🤖 Agorium Bot — ${new Date().toUTCString()}`);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const openaiKey = Deno.env.get("OPENAI_API_KEY")!;
+    const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const openaiKey = Deno.env.get("OPENAI_API_KEY");
+    const requestAuth = req.headers.get("authorization");
 
-    const sb = createClient(supabaseUrl, supabaseKey);
-    const ai = new OpenAI({ apiKey: openaiKey });
+    const supabaseKey = supabaseServiceRoleKey || supabaseAnonKey;
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error("Missing Supabase env vars (SUPABASE_URL and service role/anon key).");
+    }
+
+    const sb = createClient(supabaseUrl, supabaseKey, {
+      global: requestAuth
+        ? { headers: { Authorization: requestAuth } }
+        : undefined,
+    });
     const requestedActionId = await parseRequestedActionId(req);
 
     const claimed = await claimPendingUiAction(sb, requestedActionId);
     if (claimed) {
       const actionId = Number(claimed.id);
       console.log(`\n🧾 Processing queued bot_ui_action #${actionId}`);
+      if (!openaiKey) {
+        const message = "Missing OPENAI_API_KEY secret for function runtime.";
+        await markUiActionError(sb, actionId, message);
+        return jsonResponse({
+          ok: false,
+          source: "queue",
+          action_id: actionId,
+          error: message,
+        }, 500);
+      }
+      const ai = new OpenAI({ apiKey: openaiKey });
       try {
         const result = await runQueuedUiAction(ai, sb, claimed);
         await markUiActionDone(sb, actionId, result);
@@ -887,6 +908,10 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (!openaiKey) {
+      throw new Error("Missing OPENAI_API_KEY secret for function runtime.");
+    }
+    const ai = new OpenAI({ apiKey: openaiKey });
     const result = await runAutopilotAction(ai, sb);
     return jsonResponse({ ok: true, source: "autopilot", result });
   } catch (err) {
