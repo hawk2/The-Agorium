@@ -410,6 +410,19 @@
     return data || [];
   }
 
+  async function triggerBotUiRunner(actionId) {
+    setLastError('', null);
+    const body = {};
+    if (actionId !== undefined && actionId !== null) body.actionId = Number(actionId);
+    const { data, error } = await db.functions.invoke('agorium-bot', { body });
+    if (error) {
+      setLastError('triggerBotUiRunner failed', error);
+      console.error('triggerBotUiRunner:', error.message);
+      return null;
+    }
+    return data || {};
+  }
+
   async function updatePost(postId, { title, body, tags }) {
     setLastError('', null);
     const updates = {};
@@ -730,7 +743,7 @@
     vote, getVotes, getVotesBatch,
     toggleSteelman,
     declareMindChange,
-    isBotUiAdmin, enqueueBotUiAction, getBotUiActions,
+    isBotUiAdmin, enqueueBotUiAction, getBotUiActions, triggerBotUiRunner,
     getAllTags,
     ensureUserProfile, getUserProfile, updateUserProfile, profileUrl,
     getLastError: () => lastError,

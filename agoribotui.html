@@ -287,6 +287,7 @@
     const botForm = document.getElementById('bot-form');
     const loginForm = document.getElementById('login-form');
     const runBtn = document.getElementById('run-btn');
+    let actionsPollTimer = null;
 
     function flash(type, text) {
       const div = document.createElement('div');
@@ -404,6 +405,13 @@
       }
     }
 
+    function startActionsPolling() {
+      if (actionsPollTimer) clearInterval(actionsPollTimer);
+      actionsPollTimer = setInterval(() => {
+        if (!actionsCard.classList.contains('hidden')) loadActions();
+      }, 5000);
+    }
+
     async function refreshUi() {
       clearMessages();
       populatePersonas();
@@ -412,6 +420,7 @@
       const username = await AgoraStore.syncAuthUser();
       if (!username) {
         setAuthUi({ signedIn: false, username: '', authorized: false });
+        if (actionsPollTimer) clearInterval(actionsPollTimer);
         return;
       }
 
@@ -421,11 +430,13 @@
       if (!admin) {
         const err = AgoraStore.getLastError();
         if (err) flash('warning', err);
+        if (actionsPollTimer) clearInterval(actionsPollTimer);
         return;
       }
 
       await loadDebates();
       await loadActions();
+      startActionsPolling();
     }
 
     loginForm.addEventListener('submit', async (e) => {
@@ -487,6 +498,10 @@
       }
 
       flash('success', `Queued action #${result.id} (${result.persona} / ${result.action}).`);
+      const trigger = await AgoraStore.triggerBotUiRunner(result.id);
+      if (!trigger || trigger.ok === false) {
+        flash('warning', 'Action queued, but immediate runner trigger failed. It will run on the next bot invocation.');
+      }
       await loadActions();
     });
 

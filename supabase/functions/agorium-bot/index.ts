@@ -5,9 +5,16 @@ const MODEL = "gpt-5-mini-2025-08-07";
 const SIDES = ["for", "against"] as const;
 const PAUL_NAME = "RighteousPaul";
 type Side = (typeof SIDES)[number];
+type BotAction = "argue" | "new";
+const BOT_UI_ACTION_MAX_CLAIM_ATTEMPTS = 5;
 const PREDICT_SIDE_MAX_ATTEMPTS = 3;
 const SIDE_CLASSIFY_MAX_ATTEMPTS = 3;
 const SWITCH_DECISION_MAX_ATTEMPTS = 3;
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+};
 
 // ── Personas ─────────────────────────────────────────────────────────────────
 
@@ -505,93 +512,386 @@ async function incrementPostArgumentCounters(sb: any, postId: string, side: Side
   }
 }
 
+function normalizeAction(raw: unknown): BotAction | null {
+  const action = String(raw ?? "").trim().toLowerCase();
+  return action === "argue" || action === "new" ? action : null;
+}
+
+function getPersonaFromRaw(raw: unknown): Persona | null {
+  const key = String(raw ?? "").trim() as PersonaKey;
+  if (!Object.prototype.hasOwnProperty.call(PERSONAS, key)) return null;
+  return PERSONAS[key];
+}
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "application/json",
+    },
+  });
+}
+
+async function parseRequestedActionId(req: Request): Promise<number | null> {
+  if (req.method !== "POST") return null;
+  const contentType = String(req.headers.get("content-type") ?? "");
+  if (!contentType.toLowerCase().includes("application/json")) return null;
+  try {
+    const body = await req.json() as Record<string, unknown>;
+    const id = Number(body.actionId ?? body.action_id);
+    if (Number.isInteger(id) && id > 0) return id;
+  } catch {
+    // No-op: allow empty/non-JSON body calls.
+  }
+  return null;
+}
+
+async function getPostById(
+  sb: any,
+  postId: string,
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await sb
+    .from("posts")
+    .select("*")
+    .eq("id", postId)
+    .maybeSingle();
+  if (error) {
+    console.warn(`  Could not load target post ${postId}: ${error.message}`);
+    return null;
+  }
+  return (data as Record<string, unknown> | null) ?? null;
+}
+
+async function runArgumentAction(
+  ai: OpenAI,
+  sb: any,
+  persona: Persona,
+  post: Record<string, unknown>,
+  forcedSideRaw: unknown,
+): Promise<Record<string, unknown>> {
+  const forcedSide = normalizeSide(forcedSideRaw);
+  let side: Side;
+  let sideSource = "forced-side";
+  let paulContext: string | null = null;
+  let mentionPaul = false;
+
+  if (forcedSide) {
+    side = forcedSide;
+  } else {
+    const resolution = await resolvePersonaSide(ai, sb, persona, post);
+    side = resolution.side;
+    sideSource = resolution.source;
+    paulContext = resolution.paulContext;
+    mentionPaul = resolution.mentionPaul;
+  }
+
+  console.log(`   Action: argue on "${post.title ?? post.id}"`);
+  console.log(`   Side: ${side} (${sideSource})`);
+
+  const body = await generateArgument(
+    ai,
+    persona,
+    post,
+    side,
+    paulContext,
+    mentionPaul,
+  );
+
+  const argId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const { error } = await sb.from("arguments").insert({
+    id: argId,
+    postid: post.id,
+    side,
+    body,
+    author: persona.display_name,
+    createdat: now,
+  });
+  if (error) {
+    throw new Error(`Failed to post argument: ${error.message}`);
+  }
+
+  await incrementPostArgumentCounters(sb, String(post.id), side);
+  console.log(`✅ ${persona.display_name} argued (${side}) on: "${post.title ?? post.id}"`);
+  return {
+    action: "argue",
+    persona: persona.display_name,
+    post_id: post.id,
+    post_title: post.title ?? null,
+    side,
+    side_source: sideSource,
+    argument_id: argId,
+  };
+}
+
+async function runNewDebateAction(
+  ai: OpenAI,
+  sb: any,
+  persona: Persona,
+): Promise<Record<string, unknown>> {
+  console.log("   Action: new debate");
+  const { title, body } = await generateNewPost(ai, persona);
+  const postId = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const { error } = await sb.from("posts").insert({
+    id: postId,
+    type: "debate",
+    title,
+    body,
+    author: persona.display_name,
+    createdat: now,
+    tags: [],
+  });
+  if (error) {
+    throw new Error(`Failed to create debate: ${error.message}`);
+  }
+
+  console.log(`✅ ${persona.display_name} started: "${title}"`);
+  return {
+    action: "new",
+    persona: persona.display_name,
+    post_id: postId,
+    post_title: title,
+  };
+}
+
+async function runBotAction(
+  ai: OpenAI,
+  sb: any,
+  persona: Persona,
+  action: BotAction,
+  debateId: string | null,
+  forcedSideRaw: unknown,
+): Promise<Record<string, unknown>> {
+  console.log(`\n🎭 Persona: ${persona.display_name}`);
+  await ensurePersonaUser(sb, persona);
+
+  if (action === "new") {
+    return await runNewDebateAction(ai, sb, persona);
+  }
+
+  const postId = String(debateId ?? "").trim();
+  if (!postId) {
+    throw new Error("Argue action requires debate_id");
+  }
+  const post = await getPostById(sb, postId);
+  if (!post) {
+    throw new Error(`Debate not found: ${postId}`);
+  }
+  return await runArgumentAction(ai, sb, persona, post, forcedSideRaw);
+}
+
+async function claimPendingUiAction(
+  sb: any,
+  requestedId: number | null,
+): Promise<Record<string, unknown> | null> {
+  for (let i = 0; i < BOT_UI_ACTION_MAX_CLAIM_ATTEMPTS; i++) {
+    let query = sb
+      .from("bot_ui_actions")
+      .select("*")
+      .eq("status", "pending");
+    if (requestedId !== null) query = query.eq("id", requestedId);
+
+    const { data, error } = await query
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      if (String(error.code) === "42P01") return null;
+      console.warn(`  Could not query pending bot_ui_actions: ${error.message}`);
+      return null;
+    }
+    if (!data) return null;
+
+    const { data: claimed, error: claimErr } = await sb
+      .from("bot_ui_actions")
+      .update({
+        status: "running",
+        started_at: new Date().toISOString(),
+        finished_at: null,
+        error_text: null,
+      })
+      .eq("id", data.id)
+      .eq("status", "pending")
+      .select("*")
+      .maybeSingle();
+
+    if (claimErr) {
+      console.warn(`  Could not claim bot_ui_action ${data.id}: ${claimErr.message}`);
+      if (requestedId !== null) return null;
+      continue;
+    }
+    if (claimed) return claimed as Record<string, unknown>;
+    if (requestedId !== null) return null;
+  }
+  return null;
+}
+
+async function getUiActionById(
+  sb: any,
+  actionId: number,
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await sb
+    .from("bot_ui_actions")
+    .select("*")
+    .eq("id", actionId)
+    .maybeSingle();
+  if (error) return null;
+  return (data as Record<string, unknown> | null) ?? null;
+}
+
+async function markUiActionDone(
+  sb: any,
+  actionId: number,
+  result: Record<string, unknown>,
+): Promise<void> {
+  const { error } = await sb
+    .from("bot_ui_actions")
+    .update({
+      status: "done",
+      finished_at: new Date().toISOString(),
+      result,
+      error_text: null,
+    })
+    .eq("id", actionId);
+  if (error) {
+    console.warn(`  Could not mark bot_ui_action ${actionId} done: ${error.message}`);
+  }
+}
+
+async function markUiActionError(
+  sb: any,
+  actionId: number,
+  message: string,
+): Promise<void> {
+  const { error } = await sb
+    .from("bot_ui_actions")
+    .update({
+      status: "error",
+      finished_at: new Date().toISOString(),
+      error_text: String(message || "").slice(0, 1000),
+    })
+    .eq("id", actionId);
+  if (error) {
+    console.warn(`  Could not mark bot_ui_action ${actionId} error: ${error.message}`);
+  }
+}
+
+async function runQueuedUiAction(
+  ai: OpenAI,
+  sb: any,
+  actionRow: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const persona = getPersonaFromRaw(actionRow.persona);
+  if (!persona) throw new Error(`Unknown persona in action row: ${actionRow.persona}`);
+
+  const action = normalizeAction(actionRow.action);
+  if (!action) throw new Error(`Unknown action in action row: ${actionRow.action}`);
+
+  const debateId = String(actionRow.debate_id ?? "").trim() || null;
+  return await runBotAction(
+    ai,
+    sb,
+    persona,
+    action,
+    debateId,
+    actionRow.forced_side,
+  );
+}
+
+async function runAutopilotAction(
+  ai: OpenAI,
+  sb: any,
+): Promise<Record<string, unknown>> {
+  const keys = Object.keys(PERSONAS) as PersonaKey[];
+  const persona = PERSONAS[keys[Math.floor(Math.random() * keys.length)]];
+
+  const { data: posts, error } = await sb
+    .from("posts")
+    .select("*")
+    .order("createdat", { ascending: false })
+    .limit(10);
+  if (error) throw new Error(`Could not load posts for autopilot: ${error.message}`);
+
+  const useArgue = !!posts?.length && Math.random() < 0.7;
+  if (useArgue && posts) {
+    const target = posts.slice(0, 5)[Math.floor(Math.random() * Math.min(5, posts.length))];
+    return await runBotAction(
+      ai,
+      sb,
+      persona,
+      "argue",
+      String(target.id ?? ""),
+      null,
+    );
+  }
+  return await runBotAction(ai, sb, persona, "new", null, null);
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-Deno.serve(async (_req) => {
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS_HEADERS });
+  }
+
   try {
     console.log(`\n🤖 Agorium Bot — ${new Date().toUTCString()}`);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const openaiKey   = Deno.env.get("OPENAI_API_KEY")!;
+    const openaiKey = Deno.env.get("OPENAI_API_KEY")!;
 
     const sb = createClient(supabaseUrl, supabaseKey);
     const ai = new OpenAI({ apiKey: openaiKey });
+    const requestedActionId = await parseRequestedActionId(req);
 
-    // Pick persona
-    const keys = Object.keys(PERSONAS) as PersonaKey[];
-    const persona = PERSONAS[keys[Math.floor(Math.random() * keys.length)]];
-    console.log(`\n🎭 Persona: ${persona.display_name}`);
-
-    // Ensure user exists
-    await ensurePersonaUser(sb, persona);
-
-    // Fetch recent posts
-    const { data: posts } = await sb
-      .from("posts")
-      .select("*")
-      .order("createdat", { ascending: false })
-      .limit(10);
-
-    const now = new Date().toISOString();
-
-    if (posts?.length && Math.random() < 0.7) {
-      // 70%: argue in an existing debate
-      const target = posts.slice(0, 5)[Math.floor(Math.random() * Math.min(5, posts.length))];
-      console.log(`   Action: argue on "${target.title ?? target.id}"`);
-
-      const resolution = await resolvePersonaSide(ai, sb, persona, target as Record<string, unknown>);
-      const side = resolution.side;
-      const sideSource = resolution.source;
-      const paulContext = resolution.paulContext;
-      const mentionPaul = resolution.mentionPaul;
-      console.log(`   Side: ${side} (${sideSource})`);
-
-      const body = await generateArgument(
-        ai,
-        persona,
-        target as Record<string, unknown>,
-        side,
-        paulContext,
-        mentionPaul,
-      );
-
-      const { error } = await sb.from("arguments").insert({
-        id:        crypto.randomUUID(),
-        postid:    target.id,
-        side,
-        body,
-        author:    persona.display_name,
-        createdat: now,
-      });
-
-      if (error) console.error(`❌ Failed to post argument: ${error.message}`);
-      else {
-        await incrementPostArgumentCounters(sb, String(target.id), side);
-        console.log(`✅ ${persona.display_name} argued (${side}) on: "${target.title ?? target.id}"`);
+    const claimed = await claimPendingUiAction(sb, requestedActionId);
+    if (claimed) {
+      const actionId = Number(claimed.id);
+      console.log(`\n🧾 Processing queued bot_ui_action #${actionId}`);
+      try {
+        const result = await runQueuedUiAction(ai, sb, claimed);
+        await markUiActionDone(sb, actionId, result);
+        return jsonResponse({
+          ok: true,
+          source: "queue",
+          action_id: actionId,
+          result,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await markUiActionError(sb, actionId, message);
+        return jsonResponse({
+          ok: false,
+          source: "queue",
+          action_id: actionId,
+          error: message,
+        }, 500);
       }
-    } else {
-      // 30%: start a new debate
-      console.log("   Action: new debate");
-      const { title, body } = await generateNewPost(ai, persona);
-
-      const { error } = await sb.from("posts").insert({
-        id:        crypto.randomUUID(),
-        type:      "debate",
-        title,
-        body,
-        author:    persona.display_name,
-        createdat: now,
-        tags:      [],
-      });
-
-      if (error) console.error(`❌ Failed to create debate: ${error.message}`);
-      else console.log(`✅ ${persona.display_name} started: "${title}"`);
     }
 
-    return new Response("✅ Done", { status: 200 });
+    if (requestedActionId !== null) {
+      const existing = await getUiActionById(sb, requestedActionId);
+      if (existing) {
+        return jsonResponse({
+          ok: true,
+          source: "queue",
+          action_id: requestedActionId,
+          status: existing.status ?? "unknown",
+          result: existing.result ?? null,
+          error: existing.error_text ?? null,
+        });
+      }
+    }
+
+    const result = await runAutopilotAction(ai, sb);
+    return jsonResponse({ ok: true, source: "autopilot", result });
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error(err);
-    return new Response(`Error: ${err}`, { status: 500 });
+    return jsonResponse({ ok: false, error: message }, 500);
   }
 });
