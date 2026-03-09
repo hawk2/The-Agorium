@@ -415,6 +415,19 @@
     const body = {};
     if (actionId !== undefined && actionId !== null) body.actionId = Number(actionId);
     try {
+      // First try official SDK invoke.
+      let invoke = await db.functions.invoke('agorium-bot', { body });
+      if (!invoke.error) return invoke.data || {};
+
+      // Retry once after refreshing auth session when auth seems stale/expired.
+      const invokeErr = String(invoke.error?.message || '');
+      if (/401|unauthorized|jwt|token/i.test(invokeErr)) {
+        await db.auth.refreshSession();
+        invoke = await db.functions.invoke('agorium-bot', { body });
+        if (!invoke.error) return invoke.data || {};
+      }
+
+      // Last fallback: direct HTTP call with explicit auth header.
       const { data: sessionData } = await db.auth.getSession();
       const accessToken = sessionData?.session?.access_token || '';
       const headers = {
@@ -422,20 +435,17 @@
         apikey: SUPABASE_KEY,
       };
       if (accessToken) headers.Authorization = 'Bearer ' + accessToken;
-
       const resp = await fetch(SUPABASE_URL + '/functions/v1/agorium-bot', {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
       });
-
       const raw = await resp.text();
       let parsed = {};
       if (raw) {
         try { parsed = JSON.parse(raw); }
         catch { parsed = { raw }; }
       }
-
       if (!resp.ok) {
         const msg = parsed?.error || parsed?.raw || ('HTTP ' + resp.status);
         setLastError('triggerBotUiRunner failed', { message: msg });
