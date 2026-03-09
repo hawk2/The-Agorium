@@ -547,6 +547,13 @@ async function parseRequestedActionId(req: Request): Promise<number | null> {
   return null;
 }
 
+function hasValidCronSecret(req: Request): boolean {
+  const configured = String(Deno.env.get("AGORIUM_BOT_CRON_SECRET") ?? "").trim();
+  if (!configured) return false;
+  const supplied = String(req.headers.get("x-agorium-bot-secret") ?? "").trim();
+  return supplied.length > 0 && supplied === configured;
+}
+
 async function getPostById(
   sb: any,
   postId: string,
@@ -910,6 +917,19 @@ Deno.serve(async (req) => {
           error: existing.error_text ?? null,
         });
       }
+      return jsonResponse({
+        ok: false,
+        source: "queue",
+        action_id: requestedActionId,
+        error: `Action ${requestedActionId} not found.`,
+      }, 404);
+    }
+
+    if (!hasValidCronSecret(req)) {
+      return jsonResponse({
+        ok: false,
+        error: "Manual invoke requires actionId. Autopilot requires x-agorium-bot-secret.",
+      }, 401);
     }
 
     if (!openaiKey) {
