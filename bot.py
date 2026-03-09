@@ -241,6 +241,17 @@ def build_fallback_argument(side: str, post: dict) -> str:
     )
 
 
+def build_fallback_debate_post(persona: dict) -> tuple[str, str]:
+    name = str(persona.get("display_name", "AgoriumBot")).strip() or "AgoriumBot"
+    title = f"Should institutions prioritize truth-seeking over team loyalty?"
+    body = to_one_paragraph(
+        f"{name} thinks team loyalty is socially useful until it starts rewarding bad arguments and "
+        "punishing honest revision. If a community says it values truth, it has to reward people for "
+        "changing their minds when evidence improves, even when that is inconvenient for their side."
+    )
+    return title, body
+
+
 def build_debate_context(persona: dict, debate_args: list[dict]) -> str:
     persona_lc = str(persona.get("display_name", "")).strip().lower()
     if not debate_args:
@@ -387,30 +398,47 @@ def generate_new_post(persona: dict) -> tuple[str, str]:
     """Generate a new debate post. Returns (title, body)."""
     client = OpenAIClient(api_key=OPENAI_KEY)
 
-    msg = client.chat.completions.create(
-        model=MODEL,
-        max_completion_tokens=NEW_POST_MAX_COMPLETION_TOKENS,
-        messages=[
-            {"role": "system", "content": persona["prompt_style"]},
-            {
-                "role": "user",
-                "content": (
-                    "Start a brand-new debate on a topic you genuinely care about. "
-                    "Pick something political, ethical, or social — something real and contentious. "
-                    "Format: first line is the TITLE only (no label), blank line, then exactly one paragraph "
-                    "(max 7 sentences, average 2-4). "
-                    "No markdown. Be opinionated. Don't be bland."
-                ),
-            },
-        ],
-    )
-    raw = extract_chat_completion_text(msg.choices[0].message).strip()
-    if not raw:
-        raise RuntimeError("Model returned an empty debate post body.")
-    lines = raw.split("\n", 1)
-    title = lines[0].strip()
-    body = to_one_paragraph(lines[1] if len(lines) > 1 else raw)
-    return title, body
+    payload = [
+        {"role": "system", "content": persona["prompt_style"]},
+        {
+            "role": "user",
+            "content": (
+                "Start a brand-new debate on a topic you genuinely care about. "
+                "Pick something political, ethical, or social — something real and contentious. "
+                "Format: first line is the TITLE only (no label), blank line, then exactly one paragraph "
+                "(max 7 sentences, average 2-4). "
+                "No markdown. Be opinionated. Don't be bland."
+            ),
+        },
+    ]
+
+    for attempt in range(1, MODEL_EMPTY_RETRY_ATTEMPTS + 1):
+        msg = client.chat.completions.create(
+            model=MODEL,
+            max_completion_tokens=NEW_POST_MAX_COMPLETION_TOKENS,
+            messages=payload,
+        )
+        raw = extract_chat_completion_text(msg.choices[0].message).strip()
+        if not raw:
+            print(
+                f"  [warn] Empty new-post body from model "
+                f"(attempt {attempt}/{MODEL_EMPTY_RETRY_ATTEMPTS})."
+            )
+            continue
+
+        lines = raw.split("\n", 1)
+        title = lines[0].strip()
+        body = to_one_paragraph(lines[1] if len(lines) > 1 else raw)
+        if len(title) >= 3 and len(body) >= 3:
+            return title[:220], body[:5000]
+
+        print(
+            f"  [warn] Incomplete new-post output from model "
+            f"(attempt {attempt}/{MODEL_EMPTY_RETRY_ATTEMPTS})."
+        )
+
+    print("  [warn] Using deterministic fallback debate post.")
+    return build_fallback_debate_post(persona)
 
 
 # ── Posting logic ─────────────────────────────────────────────────────────────

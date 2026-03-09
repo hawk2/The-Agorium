@@ -463,6 +463,17 @@ function buildFallbackArgument(side: Side, post: Record<string, unknown>): strin
   );
 }
 
+function buildFallbackDebatePost(persona: Persona): { title: string; body: string } {
+  const name = String(persona.display_name || "AgoriumBot");
+  const title = "Should institutions prioritize truth-seeking over team loyalty?";
+  const body = toOneParagraph(
+    `${name} thinks team loyalty is socially useful until it starts rewarding bad arguments and ` +
+    `punishing honest revision. If a community says it values truth, it has to reward people for ` +
+    `changing their minds when evidence improves, even when that is inconvenient for their side.`,
+  );
+  return { title: title.slice(0, 220), body: body.slice(0, 5000) };
+}
+
 // ── Content generation ────────────────────────────────────────────────────────
 
 async function generateArgument(
@@ -519,13 +530,13 @@ async function generateNewPost(
   ai: OpenAI,
   persona: Persona,
 ): Promise<{ title: string; body: string }> {
-  const msg = await ai.chat.completions.create({
+  const request = {
     model: MODEL,
     max_completion_tokens: NEW_POST_MAX_COMPLETION_TOKENS,
     messages: [
-      { role: "system", content: persona.prompt_style },
+      { role: "system" as const, content: persona.prompt_style },
       {
-        role: "user",
+        role: "user" as const,
         content:
           `Start a brand-new debate on a topic you genuinely care about. ` +
           `Pick something political, ethical, or social — something real and contentious. ` +
@@ -533,19 +544,50 @@ async function generateNewPost(
           `No markdown. Be opinionated. Don't be bland.`,
       },
     ],
-  });
-  const raw = extractChatMessageText(msg.choices[0].message).trim();
-  if (!raw) throw new Error("Model returned an empty debate post body.");
-  const allLines = raw.split("\n");
-  let title = "";
-  const bodyLines: string[] = [];
-  let titleFound = false;
-  for (const line of allLines) {
-    if (!titleFound) { if (line.trim()) { title = line.trim(); titleFound = true; } }
-    else bodyLines.push(line);
+  };
+
+  for (let attempt = 1; attempt <= MODEL_EMPTY_RETRY_ATTEMPTS; attempt++) {
+    const msg = await ai.chat.completions.create(request);
+    const raw = extractChatMessageText(msg.choices[0].message).trim();
+    if (!raw) {
+      console.warn(
+        `  [warn] Empty new-post body from model ` +
+        `(attempt ${attempt}/${MODEL_EMPTY_RETRY_ATTEMPTS}).`,
+      );
+      continue;
+    }
+
+    const allLines = raw.split("\n");
+    let title = "";
+    const bodyLines: string[] = [];
+    let titleFound = false;
+    for (const line of allLines) {
+      if (!titleFound) {
+        if (line.trim()) {
+          title = line.trim();
+          titleFound = true;
+        }
+      } else {
+        bodyLines.push(line);
+      }
+    }
+    const safeTitle = (title || "A Debate Worth Having").trim();
+    const bodyText = toOneParagraph(bodyLines.join("\n").trim() || raw);
+    if (safeTitle.length >= 3 && bodyText.length >= 3) {
+      return {
+        title: safeTitle.slice(0, 220),
+        body: bodyText.slice(0, 5000),
+      };
+    }
+
+    console.warn(
+      `  [warn] Incomplete new-post output from model ` +
+      `(attempt ${attempt}/${MODEL_EMPTY_RETRY_ATTEMPTS}).`,
+    );
   }
-  const bodyText = toOneParagraph(bodyLines.join("\n").trim() || raw);
-  return { title: title || "A Debate Worth Having", body: bodyText };
+
+  console.warn("  [warn] Using deterministic fallback debate post.");
+  return buildFallbackDebatePost(persona);
 }
 
 async function incrementPostArgumentCounters(sb: any, postId: string, side: Side): Promise<void> {
