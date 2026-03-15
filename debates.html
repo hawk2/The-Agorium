@@ -244,10 +244,29 @@
     // ── DEBATES LIST ───────────────────────────────────────────────────────────
     let allPostsCache = [];
 
+    function updateEmptyState() {
+      const emptyTitle = document.querySelector('#empty-state .empty-title');
+      const emptySub = document.querySelector('#empty-state .empty-sub');
+      const emptyBtn = document.querySelector('#empty-state .empty-btn');
+      const hasSearchQuery = !!searchInput.value.trim();
+
+      if (hasSearchQuery) {
+        emptyTitle.textContent = 'No debate found.';
+        emptySub.textContent = 'Try a different search term.';
+        emptyBtn.style.display = 'none';
+        return;
+      }
+
+      emptyTitle.textContent = 'The floor is open.';
+      emptySub.textContent = 'No debates have been started yet. The Agorium is yours — bring a question worth arguing about.';
+      emptyBtn.style.display = 'inline-block';
+    }
+
     function renderGrid(posts) {
       const grid       = document.getElementById('debates-grid');
       const emptyState = document.getElementById('empty-state');
       if (!posts.length) {
+        updateEmptyState();
         grid.style.display = 'none';
         emptyState.style.display = 'block';
         return;
