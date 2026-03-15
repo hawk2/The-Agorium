@@ -550,6 +550,11 @@ def post_argument(
             "author":    persona["display_name"],
             "createdat": now,
         }).execute()
+        # Stamp last activity on the parent post
+        try:
+            sb.table("posts").update({"lastactivityat": now}).eq("id", post["id"]).execute()
+        except Exception as stamp_err:
+            print(f"  [warn] Could not stamp lastactivityat: {stamp_err}")
         print(f"✅ {persona['display_name']} argued ({side}) on: \"{post.get('title', post['id'])}\"")
         return {
             "ok": True,
@@ -578,14 +583,15 @@ def post_new_debate(sb: Client, persona: dict, response_length: Optional[str] = 
         now = datetime.now(timezone.utc).isoformat()
         post_id = str(uuid4())
         sb.table("posts").insert({
-            "id":        post_id,
-            "type":      "debate",
-            "title":     title,
-            "body":      body,
-            "author":    persona["display_name"],
-            "position":  "for",
-            "createdat": now,
-            "tags":      [],
+            "id":             post_id,
+            "type":           "debate",
+            "title":          title,
+            "body":           body,
+            "author":         persona["display_name"],
+            "position":       "for",
+            "createdat":      now,
+            "lastactivityat": now,
+            "tags":           [],
         }).execute()
         print(f"✅ {persona['display_name']} started new debate: \"{title}\"")
         return {

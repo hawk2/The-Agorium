@@ -91,6 +91,7 @@
     }
     input[type="email"],
     input[type="password"],
+    input[type="text"],
     select {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -214,7 +215,7 @@
         </div>
 
         <div class="grid">
-          <div class="field" style="grid-column: 1 / -1;">
+          <div class="field">
             <label for="response_length">Response Length</label>
             <select id="response_length" name="response_length">
               <option value="1">1 sentence</option>
@@ -222,6 +223,10 @@
               <option value="4-5">4–5 sentences</option>
               <option value="6+">6+ sentences</option>
             </select>
+          </div>
+          <div class="field">
+            <label for="hint">Hint (optional)</label>
+            <input type="text" id="hint" name="hint" placeholder="e.g. Focus on economic impact, cite Nordic countries" maxlength="500">
           </div>
         </div>
 
@@ -518,6 +523,7 @@
       const sideInput = (document.getElementById('side').value || 'auto').trim().toLowerCase();
       const forcedSide = sideInput === 'for' || sideInput === 'against' ? sideInput : null;
       const responseLength = (document.getElementById('response_length').value || '2-3').trim();
+      const hint = (document.getElementById('hint').value || '').trim() || null;
 
       if (!persona || !PERSONAS[persona]) {
         flash('error', 'Invalid persona selected.');
@@ -535,6 +541,7 @@
         debateId: action === 'argue' ? debateId : null,
         forcedSide: action === 'argue' ? forcedSide : null,
         responseLength,
+        hint,
       });
       runBtn.disabled = false;
 

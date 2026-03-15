@@ -269,6 +269,7 @@
 
   async function createPost({ type, title, body, tags, position, confidence, openingArgument, whatWouldChangeMyMind }) {
     setLastError('', null);
+    const now = new Date().toISOString();
     const post = {
       id:                    uid(),
       type,
@@ -279,7 +280,8 @@
       confidence:            confidence || null,
       whatwouldchangemymind: whatWouldChangeMyMind || null,
       author:                currentUser(),
-      createdat:             new Date().toISOString(),
+      createdat:             now,
+      lastactivityat:        now,
       argcount:              0,
       forcount:              0,
       againstcount:          0,
@@ -334,13 +336,17 @@
   }
 
   async function getAllPosts() {
-    const { data, error } = await db.from('posts').select('*').order('createdat', { ascending: false });
+    const { data, error } = await db.from('posts').select('*')
+      .order('lastactivityat', { ascending: false, nullsFirst: false })
+      .order('createdat', { ascending: false });
     if (error) { console.error('getAllPosts:', error.message); return []; }
     return data || [];
   }
 
   async function getPostsByType(type) {
-    const { data, error } = await db.from('posts').select('*').eq('type', type).order('createdat', { ascending: false });
+    const { data, error } = await db.from('posts').select('*').eq('type', type)
+      .order('lastactivityat', { ascending: false, nullsFirst: false })
+      .order('createdat', { ascending: false });
     if (error) return [];
     return data || [];
   }
@@ -353,6 +359,7 @@
       .from('posts')
       .select('*')
       .eq('type', 'debate')
+      .order('lastactivityat', { ascending: false, nullsFirst: false })
       .order('createdat', { ascending: false })
       .limit(safeLimit);
     if (error) {
@@ -374,7 +381,7 @@
     return !!data;
   }
 
-  async function enqueueBotUiAction({ persona, action, debateId, forcedSide, responseLength }) {
+  async function enqueueBotUiAction({ persona, action, debateId, forcedSide, responseLength, hint }) {
     setLastError('', null);
     const validLengths = ['1', '2-3', '4-5', '6+'];
     const payload = {
@@ -383,6 +390,7 @@
       debate_id: debateId || null,
       forced_side: forcedSide || null,
       response_length: validLengths.includes(responseLength) ? responseLength : '2-3',
+      hint: hint ? String(hint).trim().slice(0, 500) : null,
     };
 
     const { data, error } = await db
@@ -522,10 +530,13 @@
     // Init vote row for this argument
     await db.from('votes').insert([{ id: arg.id, argid: arg.id, up: 0, down: 0 }]);
 
-    // Increment post counters
+    // Increment post counters + stamp last activity
     const post = await getPost(postId);
     if (post) {
-      const updates = { argcount: (post.argcount || 0) + 1 };
+      const updates = {
+        argcount:       (post.argcount || 0) + 1,
+        lastactivityat: arg.createdat,
+      };
       if (side === 'for')     updates.forcount     = (post.forcount || 0) + 1;
       if (side === 'against') updates.againstcount = (post.againstcount || 0) + 1;
       await db.from('posts').update(updates).eq('id', postId);
@@ -661,9 +672,54 @@
     return data || [];
   }
 
+  // ── UNSEEN TRACKING ──
+
+  function markDebateViewed(postId) {
+    try { localStorage.setItem('agora_viewed_' + postId, new Date().toISOString()); } catch { /* ignore */ }
+  }
+
+  function getDebateLastViewed(postId) {
+    try { return localStorage.getItem('agora_viewed_' + postId) || null; } catch { return null; }
+  }
+
+  // ── AI SEARCH ──
+
+  async function searchDebatesAI(query) {
+    setLastError('', null);
+    if (!String(query || '').trim()) return { results: [], query };
+    try {
+      const { data: sessionData } = await db.auth.getSession();
+      const accessToken = sessionData?.session?.access_token || '';
+      const headers = {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_KEY,
+      };
+      if (accessToken) headers.Authorization = 'Bearer ' + accessToken;
+      const resp = await fetch(SUPABASE_URL + '/functions/v1/agorium-bot', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ mode: 'search', query: String(query).trim() }),
+      });
+      const raw = await resp.text();
+      let parsed = {};
+      try { parsed = JSON.parse(raw); } catch { parsed = { ok: false, error: 'Invalid response' }; }
+      if (!resp.ok || !parsed.ok) {
+        const msg = parsed?.error || 'AI search failed (' + resp.status + ')';
+        setLastError('searchDebatesAI failed', { message: msg });
+        return null;
+      }
+      return parsed;
+    } catch (err) {
+      setLastError('searchDebatesAI failed', err);
+      console.error('searchDebatesAI:', err?.message || String(err));
+      return null;
+    }
+  }
+
   // ── RENDER HELPERS (sync — data is passed in, no DB calls) ──────────────────
 
-  function renderPostCard(post) {
+  function renderPostCard(post, opts) {
+    const isNew = !!(opts && opts.isNew);
     const typeColors = {
       debate:     { border: 'var(--red)',   badge: 'rgba(164,22,35,0.08)',  color: 'var(--red)'  },
       discussion: { border: 'var(--blue)',  badge: 'rgba(113,169,247,0.1)', color: 'var(--blue)' },
@@ -675,9 +731,13 @@
       `<span style="font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.08em;padding:3px 8px;border-radius:2px;background:rgba(46,80,119,0.08);color:var(--navy);">${tag}</span>`
     ).join('');
 
+    const newBadge = isNew
+      ? `<span style="font-family:'Cinzel',serif;font-size:9px;letter-spacing:0.2em;text-transform:uppercase;padding:3px 8px;border-radius:20px;background:rgba(53,143,101,0.15);color:var(--green);font-weight:600;">NEW</span>`
+      : '';
+
     const body = post.body || '';
     return `
-      <div class="post-card" onclick="AgoraStore.setCurrentPost('${post.id}');location.href='debate.html'" style="
+      <div class="post-card" onclick="AgoraStore.markDebateViewed('${post.id}');AgoraStore.setCurrentPost('${post.id}');location.href='debate.html'" style="
         display:block; text-decoration:none; color:inherit;
         background:white; border:1px solid rgba(46,80,119,0.12);
         border-left:4px solid ${t.border}; border-radius:3px;
@@ -686,6 +746,7 @@
          onmouseout="this.style.transform='';this.style.boxShadow=''">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
           <span style="font-family:'Cinzel',serif;font-size:9px;letter-spacing:0.2em;text-transform:uppercase;padding:3px 10px;border-radius:20px;background:${t.badge};color:${t.color};">${post.type}</span>
+          ${newBadge}
           ${tagHtml}
         </div>
         <div style="font-family:'Cinzel',serif;font-size:17px;font-weight:600;color:var(--navy);line-height:1.3;margin-bottom:10px;">${escHtml(post.title)}</div>
@@ -805,6 +866,8 @@
     getAllArguments, getAllVotes,
     ensureUserProfile, getUserProfile, updateUserProfile, profileUrl,
     getLastError: () => lastError,
+    markDebateViewed, getDebateLastViewed,
+    searchDebatesAI,
     renderPostCard, renderArgCard,
     timeAgo, escHtml, escJsAttr, parseMarkdown,
   };

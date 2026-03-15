@@ -375,9 +375,11 @@ async function generateArgument(
   post: Record<string, unknown>,
   side: Side,
   responseLength?: string | null,
+  hint?: string | null,
 ): Promise<string> {
   const title = post.title ?? "";
   const body  = post.body ?? "";
+  const hintLine = hint ? `\n\nGuidance from the organizer: ${hint}` : "";
   const request = {
     model: MODEL,
     max_completion_tokens: ARGUMENT_MAX_COMPLETION_TOKENS,
@@ -389,7 +391,8 @@ async function generateArgument(
           `You're arguing in this debate:\nTitle: ${title}\n\n${body}\n\n` +
           `You must argue the ${side.toUpperCase()} side. Do not switch sides.\n\n` +
           `Write your argument in exactly one paragraph (${resolveResponseLengthDesc(responseLength)}). No markdown. No headers. ` +
-          `Argue hard. Make a real point. Be true to your character.`,
+          `Argue hard. Make a real point. Be true to your character.` +
+          hintLine,
       },
     ],
   };
@@ -477,7 +480,9 @@ async function generateNewPost(
   ai: OpenAI,
   persona: Persona,
   responseLength?: string | null,
+  hint?: string | null,
 ): Promise<{ title: string; body: string }> {
+  const hintLine = hint ? `\n\nTopic guidance: ${hint}` : "";
   const request = {
     model: MODEL,
     max_completion_tokens: NEW_POST_MAX_COMPLETION_TOKENS,
@@ -489,7 +494,8 @@ async function generateNewPost(
           `Start a brand-new debate on a topic you genuinely care about. ` +
           `Pick something political, ethical, or social — something real and contentious. ` +
           `Format: first line is the TITLE only (no label, no markdown), blank line, then exactly one paragraph (${resolveResponseLengthDesc(responseLength)}). ` +
-          `No markdown. Be opinionated. Don't be bland.`,
+          `No markdown. Be opinionated. Don't be bland.` +
+          hintLine,
       },
     ],
   };
@@ -531,8 +537,9 @@ async function incrementPostArgumentCounters(sb: any, postId: string, side: Side
     return;
   }
 
-  const updates: Record<string, number> = {
+  const updates: Record<string, number | string> = {
     argcount: Number(post.argcount || 0) + 1,
+    lastactivityat: new Date().toISOString(),
   };
   if (side === "for") updates.forcount = Number(post.forcount || 0) + 1;
   if (side === "against") updates.againstcount = Number(post.againstcount || 0) + 1;
@@ -564,18 +571,82 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
-async function parseRequestedActionId(req: Request): Promise<number | null> {
+async function parseRequestBody(req: Request): Promise<Record<string, unknown> | null> {
   if (req.method !== "POST") return null;
   const contentType = String(req.headers.get("content-type") ?? "");
   if (!contentType.toLowerCase().includes("application/json")) return null;
   try {
-    const body = await req.json() as Record<string, unknown>;
-    const id = Number(body.actionId ?? body.action_id);
-    if (Number.isInteger(id) && id > 0) return id;
+    return await req.json() as Record<string, unknown>;
   } catch {
     // No-op: allow empty/non-JSON body calls.
+    return null;
   }
+}
+
+function getRequestedActionId(body: Record<string, unknown> | null): number | null {
+  if (!body) return null;
+  const id = Number(body.actionId ?? body.action_id);
+  if (Number.isInteger(id) && id > 0) return id;
   return null;
+}
+
+async function runSearchAction(
+  ai: OpenAI,
+  sb: any,
+  query: string,
+): Promise<Record<string, unknown>> {
+  const trimmedQuery = String(query ?? "").trim();
+  if (!trimmedQuery) return { results: [], query: "" };
+
+  const { data: posts, error } = await sb
+    .from("posts")
+    .select("id, title, body, type, tags")
+    .order("createdat", { ascending: false })
+    .limit(50);
+  if (error) throw new Error(`Could not load posts for search: ${error.message}`);
+  if (!posts?.length) return { results: [], query: trimmedQuery };
+
+  const postList = (posts as Record<string, unknown>[]).map((p, i) =>
+    `[${i}] ID: ${p.id}\nTitle: ${p.title}\nBody: ${String(p.body ?? "").slice(0, 250)}`
+  ).join("\n\n");
+
+  const msg = await ai.chat.completions.create({
+    model: MODEL,
+    max_completion_tokens: 1200,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a semantic search engine for a debate forum. " +
+          "Given a list of debates and a search query, identify the most relevant debates. " +
+          'Return a JSON array of objects with fields: id (string), relevance (number 1-10), reason (short string, max 15 words). ' +
+          "Only include debates with relevance >= 6. Maximum 10 results. " +
+          "Respond with only the JSON array, no other text.",
+      },
+      {
+        role: "user",
+        content: `Search query: "${trimmedQuery}"\n\nDebates:\n${postList}`,
+      },
+    ],
+  });
+
+  const raw = extractChatMessageText(msg.choices[0].message).trim();
+  let ranked: Array<{ id: string; relevance: number; reason: string }> = [];
+  try {
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (match) ranked = JSON.parse(match[0]);
+  } catch {
+    console.warn("  [search] Could not parse AI search results:", raw.slice(0, 200));
+  }
+
+  const postMap = new Map((posts as Record<string, unknown>[]).map((p) => [String(p.id), p]));
+  const enriched = ranked
+    .filter((r) => r && r.id && postMap.has(r.id))
+    .sort((a, b) => (b.relevance || 0) - (a.relevance || 0))
+    .slice(0, 10)
+    .map((r) => ({ ...postMap.get(r.id), _relevance: r.relevance, _reason: r.reason }));
+
+  return { results: enriched, query: trimmedQuery };
 }
 
 function hasValidCronSecret(req: Request): boolean {
@@ -608,6 +679,7 @@ async function runArgumentAction(
   post: Record<string, unknown>,
   forcedSideRaw: unknown,
   responseLength?: string | null,
+  hint?: string | null,
 ): Promise<Record<string, unknown>> {
   const forcedSide = normalizeSide(forcedSideRaw);
   let side: Side;
@@ -624,7 +696,7 @@ async function runArgumentAction(
   console.log(`   Action: argue on "${post.title ?? post.id}"`);
   console.log(`   Side: ${side} (${sideSource})`);
 
-  const body = await generateArgument(ai, persona, post, side, responseLength);
+  const body = await generateArgument(ai, persona, post, side, responseLength, hint);
   if (body.trim().length < 3) {
     throw new Error("Generated argument body was empty.");
   }
@@ -661,9 +733,10 @@ async function runNewDebateAction(
   sb: any,
   persona: Persona,
   responseLength?: string | null,
+  hint?: string | null,
 ): Promise<Record<string, unknown>> {
   console.log("   Action: new debate");
-  const { title, body } = await generateNewPost(ai, persona, responseLength);
+  const { title, body } = await generateNewPost(ai, persona, responseLength, hint);
   const postId = crypto.randomUUID();
   const now = new Date().toISOString();
 
@@ -674,6 +747,7 @@ async function runNewDebateAction(
     body,
     author: persona.display_name,
     createdat: now,
+    lastactivityat: now,
     tags: [],
     argcount: 0,
     forcount: 0,
@@ -701,12 +775,13 @@ async function runBotAction(
   debateId: string | null,
   forcedSideRaw: unknown,
   responseLength?: string | null,
+  hint?: string | null,
 ): Promise<Record<string, unknown>> {
   console.log(`\n🎭 Persona: ${persona.display_name}`);
   await ensurePersonaUser(sb, persona);
 
   if (action === "new") {
-    return await runNewDebateAction(ai, sb, persona, responseLength);
+    return await runNewDebateAction(ai, sb, persona, responseLength, hint);
   }
 
   const postId = String(debateId ?? "").trim();
@@ -717,7 +792,7 @@ async function runBotAction(
   if (!post) {
     throw new Error(`Debate not found: ${postId}`);
   }
-  return await runArgumentAction(ai, sb, persona, post, forcedSideRaw, responseLength);
+  return await runArgumentAction(ai, sb, persona, post, forcedSideRaw, responseLength, hint);
 }
 
 async function claimPendingUiAction(
@@ -829,6 +904,7 @@ async function runQueuedUiAction(
 
   const debateId = String(actionRow.debate_id ?? "").trim() || null;
   const responseLength = String(actionRow.response_length ?? "").trim() || null;
+  const hint = String(actionRow.hint ?? "").trim() || null;
   return await runBotAction(
     ai,
     sb,
@@ -837,6 +913,7 @@ async function runQueuedUiAction(
     debateId,
     actionRow.forced_side,
     responseLength,
+    hint,
   );
 }
 
@@ -899,7 +976,18 @@ Deno.serve(async (req) => {
         ? { headers: { Authorization: requestAuth! } }
         : undefined,
     });
-    const requestedActionId = await parseRequestedActionId(req);
+    const reqBody = await parseRequestBody(req);
+    const requestedActionId = getRequestedActionId(reqBody);
+
+    // ── Search mode ──────────────────────────────────────────────────────────
+    if (reqBody?.mode === "search") {
+      if (!openaiKey) {
+        return jsonResponse({ ok: false, error: "Missing OPENAI_API_KEY" }, 500);
+      }
+      const ai = new OpenAI({ apiKey: openaiKey });
+      const searchResult = await runSearchAction(ai, sb, String(reqBody.query ?? ""));
+      return jsonResponse({ ok: true, ...searchResult });
+    }
 
     const claimed = await claimPendingUiAction(sb, requestedActionId);
     if (claimed) {

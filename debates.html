@@ -79,6 +79,31 @@
     .pill-against { background: rgba(164,22,35,0.08); color: var(--red); }
     .card-age { color: #bbb; font-family: 'Cinzel', serif; font-size: 11px; letter-spacing: 0.05em; }
 
+    /* SEARCH BAR */
+    .search-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 32px; flex-wrap: wrap; }
+    .search-input {
+      flex: 1; min-width: 200px;
+      font-family: 'EB Garamond', Georgia, serif; font-size: 16px;
+      padding: 10px 16px; border: 1px solid rgba(46,80,119,0.2); border-radius: 2px;
+      background: white; color: var(--ink); outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-input:focus { border-color: var(--blue); }
+    .search-btn {
+      font-family: 'Cinzel', serif; font-size: 12px; letter-spacing: 0.1em;
+      padding: 10px 20px; border: none; border-radius: 2px; cursor: pointer;
+      transition: all 0.2s; white-space: nowrap;
+    }
+    .search-btn-ai { background: var(--navy); color: white; }
+    .search-btn-ai:hover { background: #1e3a5f; }
+    .search-btn-ai:disabled { opacity: 0.6; cursor: not-allowed; }
+    .search-btn-clear { background: transparent; border: 1px solid rgba(46,80,119,0.25); color: var(--navy); }
+    .search-btn-clear:hover { border-color: var(--navy); }
+    .search-label {
+      font-family: 'Cinzel', serif; font-size: 11px; letter-spacing: 0.15em;
+      text-transform: uppercase; color: #aaa; margin-top: 2px;
+    }
+
     /* LOADING STATE */
     .loading-state { text-align: center; padding: 80px 24px; color: #aaa; }
     .loading-spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid rgba(46,80,119,0.12); border-top-color: var(--navy); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
@@ -140,6 +165,13 @@
         </div>
       <button class="new-debate-btn" onclick="requireAuth('submit.html')">+ Start a Debate</button>
       </div>
+
+      <div class="search-bar">
+        <input class="search-input" id="search-input" type="text" placeholder="Search debates…" autocomplete="off">
+        <button class="search-btn search-btn-ai" id="ai-search-btn" title="Use AI to find debates by topic or argument">⚡ AI Search</button>
+        <button class="search-btn search-btn-clear" id="clear-search-btn" style="display:none;">✕ Clear</button>
+      </div>
+      <div class="search-label" id="search-label" style="display:none;margin-top:-20px;margin-bottom:20px;"></div>
 
       <div class="loading-state" id="loading-state">
         <div class="loading-spinner"></div>
@@ -210,10 +242,30 @@
     }
 
     // ── DEBATES LIST ───────────────────────────────────────────────────────────
-    async function renderDebates() {
-      const loading   = document.getElementById('loading-state');
+    let allPostsCache = [];
+
+    function renderGrid(posts) {
+      const grid       = document.getElementById('debates-grid');
       const emptyState = document.getElementById('empty-state');
-      const grid      = document.getElementById('debates-grid');
+      if (!posts.length) {
+        grid.style.display = 'none';
+        emptyState.style.display = 'block';
+        return;
+      }
+      emptyState.style.display = 'none';
+      grid.style.display = 'grid';
+      grid.innerHTML = posts.map(p => {
+        const lastViewed = AgoraStore.getDebateLastViewed(p.id);
+        const lastActivity = p.lastactivityat || p.createdat;
+        const isNew = lastActivity && (!lastViewed || new Date(lastActivity) > new Date(lastViewed));
+        return AgoraStore.renderPostCard(p, { isNew: !!isNew });
+      }).join('');
+    }
+
+    async function renderDebates() {
+      const loading    = document.getElementById('loading-state');
+      const emptyState = document.getElementById('empty-state');
+      const grid       = document.getElementById('debates-grid');
 
       loading.style.display = 'block';
       emptyState.style.display = 'none';
@@ -232,13 +284,86 @@
         loading.style.display = 'block';
         return;
       }
-      if (!posts.length) {
-        emptyState.style.display = 'block';
+
+      allPostsCache = posts || [];
+      const q = document.getElementById('search-input').value.trim().toLowerCase();
+      if (q) {
+        const filtered = allPostsCache.filter(p =>
+          (p.title || '').toLowerCase().includes(q) ||
+          (p.body  || '').toLowerCase().includes(q) ||
+          (p.tags  || []).some(t => t.toLowerCase().includes(q))
+        );
+        renderGrid(filtered);
+      } else {
+        renderGrid(allPostsCache);
+      }
+    }
+
+    // ── SEARCH ──────────────────────────────────────────────────────────────────
+    const searchInput    = document.getElementById('search-input');
+    const aiSearchBtn    = document.getElementById('ai-search-btn');
+    const clearSearchBtn = document.getElementById('clear-search-btn');
+    const searchLabel    = document.getElementById('search-label');
+
+    function showSearchLabel(text) {
+      searchLabel.textContent = text;
+      searchLabel.style.display = text ? 'block' : 'none';
+    }
+
+    function applySimpleFilter() {
+      const q = searchInput.value.trim().toLowerCase();
+      clearSearchBtn.style.display = q ? 'inline-block' : 'none';
+      showSearchLabel('');
+      if (!allPostsCache.length) return;
+      if (!q) { renderGrid(allPostsCache); return; }
+      const filtered = allPostsCache.filter(p =>
+        (p.title || '').toLowerCase().includes(q) ||
+        (p.body  || '').toLowerCase().includes(q) ||
+        (p.tags  || []).some(t => t.toLowerCase().includes(q))
+      );
+      renderGrid(filtered);
+    }
+
+    searchInput.addEventListener('input', applySimpleFilter);
+    searchInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); aiSearchBtn.click(); }
+    });
+
+    clearSearchBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      clearSearchBtn.style.display = 'none';
+      showSearchLabel('');
+      renderGrid(allPostsCache);
+    });
+
+    aiSearchBtn.addEventListener('click', async () => {
+      const q = searchInput.value.trim();
+      if (!q) { searchInput.focus(); return; }
+
+      aiSearchBtn.disabled = true;
+      aiSearchBtn.textContent = '⏳ Searching…';
+      showSearchLabel('');
+
+      const result = await AgoraStore.searchDebatesAI(q);
+
+      aiSearchBtn.disabled = false;
+      aiSearchBtn.textContent = '⚡ AI Search';
+
+      if (!result) {
+        showSearchLabel('AI search failed — try again or use the text filter.');
         return;
       }
-      grid.style.display = 'grid';
-      grid.innerHTML = posts.map(p => AgoraStore.renderPostCard(p)).join('');
-    }
+
+      const hits = result.results || [];
+      clearSearchBtn.style.display = 'inline-block';
+      if (!hits.length) {
+        showSearchLabel('No AI matches found for "' + q + '".');
+        renderGrid([]);
+        return;
+      }
+      showSearchLabel('AI found ' + hits.length + ' result' + (hits.length !== 1 ? 's' : '') + ' for "' + q + '"');
+      renderGrid(hits);
+    });
 
     async function initPage() {
       await AgoraStore.syncAuthUser();

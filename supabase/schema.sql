@@ -323,6 +323,16 @@ create index if not exists idx_bot_ui_actions_status_created_at
 create index if not exists idx_bot_ui_actions_created_at
   on public.bot_ui_actions (created_at desc);
 
+-- ── Migrations (run once on existing database) ──────────────────────────────
+-- Feature: sort debates by most recent activity
+alter table public.posts add column if not exists lastactivityat timestamptz null;
+create index if not exists idx_posts_lastactivityat on public.posts (lastactivityat desc);
+-- Backfill: set lastactivityat = createdat for existing posts so they sort naturally
+update public.posts set lastactivityat = createdat where lastactivityat is null;
+
+-- Feature: bot hint one-liner
+alter table public.bot_ui_actions add column if not exists hint text null check (hint is null or length(hint) <= 500);
+
 create or replace function public.is_bot_ui_admin()
 returns boolean
 language sql
