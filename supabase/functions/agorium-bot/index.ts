@@ -20,6 +20,19 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
+const RESPONSE_LENGTH_DESCRIPTIONS: Record<string, string> = {
+  "1":   "exactly 1 sentence",
+  "2-3": "2–3 sentences",
+  "4-5": "4–5 sentences",
+  "6+":  "6 or more sentences",
+};
+const DEFAULT_RESPONSE_LENGTH = "2-3";
+
+function resolveResponseLengthDesc(responseLength: string | null | undefined): string {
+  const key = String(responseLength ?? "").trim();
+  return RESPONSE_LENGTH_DESCRIPTIONS[key] ?? RESPONSE_LENGTH_DESCRIPTIONS[DEFAULT_RESPONSE_LENGTH];
+}
+
 // ── Personas ─────────────────────────────────────────────────────────────────
 
 const PERSONAS = {
@@ -483,6 +496,7 @@ async function generateArgument(
   side: Side,
   paulContext: string | null,
   mentionPaul: boolean,
+  responseLength?: string | null,
 ): Promise<string> {
   const title = post.title ?? "";
   const body  = post.body ?? "";
@@ -503,7 +517,7 @@ async function generateArgument(
           `You're arguing in this debate:\nTitle: ${title}\n\n${body}\n\n` +
           `You must argue the ${side.toUpperCase()} side. Do not switch sides.` +
           `${rebuttalBlock}\n\n` +
-          `Write your argument in exactly one paragraph. No markdown. No headers. ` +
+          `Write your argument in exactly one paragraph (${resolveResponseLengthDesc(responseLength)}). No markdown. No headers. ` +
           `Argue hard. Make a real point. Be true to your character.`,
       },
     ],
@@ -576,6 +590,7 @@ function parseNewPostOutput(raw: string): { title: string; body: string } | null
 async function generateNewPost(
   ai: OpenAI,
   persona: Persona,
+  responseLength?: string | null,
 ): Promise<{ title: string; body: string }> {
   const request = {
     model: MODEL,
@@ -587,7 +602,7 @@ async function generateNewPost(
         content:
           `Start a brand-new debate on a topic you genuinely care about. ` +
           `Pick something political, ethical, or social — something real and contentious. ` +
-          `Format: first line is the TITLE only (no label, no markdown), blank line, then exactly one paragraph. ` +
+          `Format: first line is the TITLE only (no label, no markdown), blank line, then exactly one paragraph (${resolveResponseLengthDesc(responseLength)}). ` +
           `No markdown. Be opinionated. Don't be bland.`,
       },
     ],
@@ -704,6 +719,7 @@ async function runArgumentAction(
   persona: Persona,
   post: Record<string, unknown>,
   forcedSideRaw: unknown,
+  responseLength?: string | null,
 ): Promise<Record<string, unknown>> {
   const forcedSide = normalizeSide(forcedSideRaw);
   let side: Side;
@@ -731,6 +747,7 @@ async function runArgumentAction(
     side,
     paulContext,
     mentionPaul,
+    responseLength,
   );
   if (body.trim().length < 3) {
     throw new Error("Generated argument body was empty.");
@@ -767,9 +784,10 @@ async function runNewDebateAction(
   ai: OpenAI,
   sb: any,
   persona: Persona,
+  responseLength?: string | null,
 ): Promise<Record<string, unknown>> {
   console.log("   Action: new debate");
-  const { title, body } = await generateNewPost(ai, persona);
+  const { title, body } = await generateNewPost(ai, persona, responseLength);
   const postId = crypto.randomUUID();
   const now = new Date().toISOString();
 
@@ -806,12 +824,13 @@ async function runBotAction(
   action: BotAction,
   debateId: string | null,
   forcedSideRaw: unknown,
+  responseLength?: string | null,
 ): Promise<Record<string, unknown>> {
   console.log(`\n🎭 Persona: ${persona.display_name}`);
   await ensurePersonaUser(sb, persona);
 
   if (action === "new") {
-    return await runNewDebateAction(ai, sb, persona);
+    return await runNewDebateAction(ai, sb, persona, responseLength);
   }
 
   const postId = String(debateId ?? "").trim();
@@ -822,7 +841,7 @@ async function runBotAction(
   if (!post) {
     throw new Error(`Debate not found: ${postId}`);
   }
-  return await runArgumentAction(ai, sb, persona, post, forcedSideRaw);
+  return await runArgumentAction(ai, sb, persona, post, forcedSideRaw, responseLength);
 }
 
 async function claimPendingUiAction(
@@ -933,6 +952,7 @@ async function runQueuedUiAction(
   if (!action) throw new Error(`Unknown action in action row: ${actionRow.action}`);
 
   const debateId = String(actionRow.debate_id ?? "").trim() || null;
+  const responseLength = String(actionRow.response_length ?? "").trim() || null;
   return await runBotAction(
     ai,
     sb,
@@ -940,6 +960,7 @@ async function runQueuedUiAction(
     action,
     debateId,
     actionRow.forced_side,
+    responseLength,
   );
 }
 

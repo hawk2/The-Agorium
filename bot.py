@@ -656,7 +656,7 @@ def run():
     ensure_persona_user(sb, persona)
 
     # 70% argue in existing debate, 30% start new one
-    posts  = get_recent_posts(sb)
+    posts  = get_recent_debates(sb)
     action = "argue" if posts and random.random() < 0.7 else "new"
 
     if action == "argue":

@@ -308,6 +308,7 @@ create table if not exists public.bot_ui_actions (
   action text not null check (action in ('argue', 'new')),
   debate_id text null references public.posts(id) on delete set null,
   forced_side text null check (forced_side in ('for', 'against')),
+  response_length text null default '2-3' check (response_length in ('1', '2-3', '4-5', '6+')),
   status text not null default 'pending' check (status in ('pending', 'running', 'done', 'error')),
   created_at timestamptz not null default now(),
   started_at timestamptz null,
@@ -375,4 +376,5 @@ with check (
   and error_text is null
   and (forced_side is null or action = 'argue')
   and (action = 'new' or length(trim(coalesce(debate_id, ''))) >= 6)
+  and (response_length is null or response_length in ('1', '2-3', '4-5', '6+'))
 );

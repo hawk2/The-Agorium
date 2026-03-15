@@ -647,6 +647,20 @@
     return (data || []).map(r => r.tag);
   }
 
+  // ── LEADERBOARD HELPERS (used by halloffame.html) ──
+
+  async function getAllArguments() {
+    const { data, error } = await db.from('arguments').select('*');
+    if (error) { console.error('getAllArguments:', error.message); return []; }
+    return data || [];
+  }
+
+  async function getAllVotes() {
+    const { data, error } = await db.from('votes').select('id, up, down');
+    if (error) { console.error('getAllVotes:', error.message); return []; }
+    return data || [];
+  }
+
   // ── RENDER HELPERS (sync — data is passed in, no DB calls) ──────────────────
 
   function renderPostCard(post) {
@@ -764,7 +778,7 @@
   }
 
   // Simple inline Markdown renderer.
-  // Input must be pre-escaped with escHtml — patterns match only on escaped text.
+  // Input is raw (unescaped) text — escHtml is called internally before applying patterns.
   // Supported: **bold**, *italic*, _italic_, ~~strikethrough~~, newlines → <br>
   function parseMarkdown(rawStr) {
     let s = escHtml(rawStr);
@@ -788,6 +802,7 @@
     declareMindChange,
     isBotUiAdmin, enqueueBotUiAction, getBotUiActions, triggerBotUiRunner,
     getAllTags,
+    getAllArguments, getAllVotes,
     ensureUserProfile, getUserProfile, updateUserProfile, profileUrl,
     getLastError: () => lastError,
     renderPostCard, renderArgCard,

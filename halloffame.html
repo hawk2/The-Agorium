@@ -421,21 +421,11 @@
     // ── INIT ──────────────────────────────────────────────────────────────────
 
     async function getAllArguments() {
-      // Query Supabase directly using the same client indirectly via store's exported profileUrl
-      // We create our own client here for queries not exposed by AgoraStore
-      const SUPABASE_URL = 'https://auboquhnqswseneeosyj.supabase.co';
-      const SUPABASE_KEY = 'sb_publishable_j13mrxvpNWC12QhJFSVPYQ_Q-kdsL0s';
-      const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-      const { data } = await client.from('arguments').select('*');
-      return data || [];
+      return await AgoraStore.getAllArguments();
     }
 
     async function getAllVotes() {
-      const SUPABASE_URL = 'https://auboquhnqswseneeosyj.supabase.co';
-      const SUPABASE_KEY = 'sb_publishable_j13mrxvpNWC12QhJFSVPYQ_Q-kdsL0s';
-      const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-      const { data } = await client.from('votes').select('id, up, down');
-      return data || [];
+      return await AgoraStore.getAllVotes();
     }
 
     const errHtml = '<div class="hof-empty"><div class="hof-empty-icon">⚠</div><div class="hof-empty-text">Could not load — check your connection and refresh.</div></div>';
