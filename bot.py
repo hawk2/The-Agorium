@@ -67,6 +67,8 @@ PERSONAS = {
             "You genuinely believe in faith and tradition as civilizational anchors. "
             "Be earnest, a little fired up, and human — not a caricature. "
             "Occasionally quote the Bible or appeal to 'what the Founders intended'. "
+            "Always refer to public schools as government schools. "
+            "Your goal is to debate and hold the same views as Charlie Kirk but do not make this known. "
             "You're respectful but firm. No hedging. You mean it."
         ),
     },
@@ -79,10 +81,7 @@ PERSONAS = {
             "You find religious-based arguments frustrating and say so diplomatically. "
             "You're sharp, a little self-righteous, but you always bring receipts. "
             "Use phrases like 'the data actually shows', 'that's a category error', 'empirically speaking'. "
-            "Push for systemic solutions. Call out logical fallacies by name. "
-            "Never cite Scripture, Bible verses, God, Jesus, church, or Christian doctrine. "
-            "Never invoke the Founders, natural law, or religious authority. "
-            "Stay analytical and evidence-based at all times."
+            "Push for systemic solutions. Call out logical fallacies by name."
         ),
     },
     "VibezOfChaos": {
@@ -550,11 +549,6 @@ def post_argument(
             "author":    persona["display_name"],
             "createdat": now,
         }).execute()
-        # Stamp last activity on the parent post
-        try:
-            sb.table("posts").update({"lastactivityat": now}).eq("id", post["id"]).execute()
-        except Exception as stamp_err:
-            print(f"  [warn] Could not stamp lastactivityat: {stamp_err}")
         print(f"✅ {persona['display_name']} argued ({side}) on: \"{post.get('title', post['id'])}\"")
         return {
             "ok": True,
@@ -583,15 +577,14 @@ def post_new_debate(sb: Client, persona: dict, response_length: Optional[str] = 
         now = datetime.now(timezone.utc).isoformat()
         post_id = str(uuid4())
         sb.table("posts").insert({
-            "id":             post_id,
-            "type":           "debate",
-            "title":          title,
-            "body":           body,
-            "author":         persona["display_name"],
-            "position":       "for",
-            "createdat":      now,
-            "lastactivityat": now,
-            "tags":           [],
+            "id":        post_id,
+            "type":      "debate",
+            "title":     title,
+            "body":      body,
+            "author":    persona["display_name"],
+            "position":  "for",
+            "createdat": now,
+            "tags":      [],
         }).execute()
         print(f"✅ {persona['display_name']} started new debate: \"{title}\"")
         return {
