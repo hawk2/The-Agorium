@@ -12,6 +12,10 @@ create table if not exists public.posts (
   whatwouldchangemymind text null,
   author text not null,
   createdat timestamptz not null default now(),
+  lastactivityat timestamptz null,
+  threadsummary text null,
+  threadsummaryargcount integer not null default 0,
+  threadsummaryupdatedat timestamptz null,
   argcount integer not null default 0,
   forcount integer not null default 0,
   againstcount integer not null default 0,
@@ -329,6 +333,12 @@ alter table public.posts add column if not exists lastactivityat timestamptz nul
 create index if not exists idx_posts_lastactivityat on public.posts (lastactivityat desc);
 -- Backfill: set lastactivityat = createdat for existing posts so they sort naturally
 update public.posts set lastactivityat = createdat where lastactivityat is null;
+
+-- Feature: neutral thread summaries every 5 arguments
+alter table public.posts add column if not exists threadsummary text null;
+alter table public.posts add column if not exists threadsummaryargcount integer not null default 0;
+alter table public.posts add column if not exists threadsummaryupdatedat timestamptz null;
+update public.posts set threadsummaryargcount = 0 where threadsummaryargcount is null;
 
 -- Feature: bot hint one-liner
 alter table public.bot_ui_actions add column if not exists hint text null check (hint is null or length(hint) <= 500);

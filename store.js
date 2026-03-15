@@ -424,6 +424,28 @@
     return data || [];
   }
 
+  async function callAgoriumBotFunction(body) {
+    const { data: sessionData } = await db.auth.getSession();
+    const accessToken = sessionData?.session?.access_token || '';
+    const headers = {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_KEY,
+    };
+    if (accessToken) headers.Authorization = 'Bearer ' + accessToken;
+    const resp = await fetch(SUPABASE_URL + '/functions/v1/agorium-bot', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body || {}),
+    });
+    const raw = await resp.text();
+    let parsed = {};
+    if (raw) {
+      try { parsed = JSON.parse(raw); }
+      catch { parsed = { raw }; }
+    }
+    return { resp, parsed, raw };
+  }
+
   async function triggerBotUiRunner(actionId) {
     setLastError('', null);
     const body = {};
@@ -442,24 +464,7 @@
       }
 
       // Last fallback: direct HTTP call with explicit auth header.
-      const { data: sessionData } = await db.auth.getSession();
-      const accessToken = sessionData?.session?.access_token || '';
-      const headers = {
-        'Content-Type': 'application/json',
-        apikey: SUPABASE_KEY,
-      };
-      if (accessToken) headers.Authorization = 'Bearer ' + accessToken;
-      const resp = await fetch(SUPABASE_URL + '/functions/v1/agorium-bot', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
-      const raw = await resp.text();
-      let parsed = {};
-      if (raw) {
-        try { parsed = JSON.parse(raw); }
-        catch { parsed = { raw }; }
-      }
+      const { resp, parsed } = await callAgoriumBotFunction(body);
       if (!resp.ok) {
         const msg = parsed?.error || parsed?.raw || ('HTTP ' + resp.status);
         setLastError('triggerBotUiRunner failed', { message: msg });
@@ -533,13 +538,17 @@
     // Increment post counters + stamp last activity
     const post = await getPost(postId);
     if (post) {
+      const newArgCount = (post.argcount || 0) + 1;
       const updates = {
-        argcount:       (post.argcount || 0) + 1,
+        argcount:       newArgCount,
         lastactivityat: arg.createdat,
       };
       if (side === 'for')     updates.forcount     = (post.forcount || 0) + 1;
       if (side === 'against') updates.againstcount = (post.againstcount || 0) + 1;
       await db.from('posts').update(updates).eq('id', postId);
+      if (newArgCount > 0 && newArgCount % 5 === 0) {
+        refreshThreadSummary(postId, newArgCount);
+      }
     }
 
     return arg;
@@ -684,25 +693,30 @@
 
   // ── AI SEARCH ──
 
+  async function refreshThreadSummary(postId, targetArgCount) {
+    try {
+      const { resp, parsed } = await callAgoriumBotFunction({
+        mode: 'refresh-thread-summary',
+        postId,
+        targetArgCount,
+      });
+      if (!resp.ok || !parsed.ok) {
+        const msg = parsed?.error || ('Thread summary refresh failed (' + resp.status + ')');
+        console.warn('refreshThreadSummary:', msg);
+        return null;
+      }
+      return parsed;
+    } catch (err) {
+      console.warn('refreshThreadSummary:', err?.message || String(err));
+      return null;
+    }
+  }
+
   async function searchDebatesAI(query) {
     setLastError('', null);
     if (!String(query || '').trim()) return { results: [], query };
     try {
-      const { data: sessionData } = await db.auth.getSession();
-      const accessToken = sessionData?.session?.access_token || '';
-      const headers = {
-        'Content-Type': 'application/json',
-        apikey: SUPABASE_KEY,
-      };
-      if (accessToken) headers.Authorization = 'Bearer ' + accessToken;
-      const resp = await fetch(SUPABASE_URL + '/functions/v1/agorium-bot', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ mode: 'search', query: String(query).trim() }),
-      });
-      const raw = await resp.text();
-      let parsed = {};
-      try { parsed = JSON.parse(raw); } catch { parsed = { ok: false, error: 'Invalid response' }; }
+      const { resp, parsed } = await callAgoriumBotFunction({ mode: 'search', query: String(query).trim() });
       if (!resp.ok || !parsed.ok) {
         const msg = parsed?.error || 'AI search failed (' + resp.status + ')';
         setLastError('searchDebatesAI failed', { message: msg });

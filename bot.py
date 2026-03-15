@@ -36,7 +36,10 @@ MODEL = "gpt-5-mini-2025-08-07"
 DECISION_MAX_COMPLETION_TOKENS = 5000
 ARGUMENT_MAX_COMPLETION_TOKENS = 5000
 NEW_POST_MAX_COMPLETION_TOKENS = 5000
+THREAD_SUMMARY_MAX_COMPLETION_TOKENS = 1200
 MODEL_EMPTY_RETRY_ATTEMPTS = 3
+THREAD_SUMMARY_INTERVAL = 5
+THREAD_SUMMARY_MAX_CHARS = 4000
 
 SIDES = ["for", "against"]
 
@@ -254,8 +257,8 @@ def build_fallback_argument(side: str, post: dict) -> str:
     )
 
 
-def build_debate_context(persona: dict, debate_args: list[dict]) -> str:
-    persona_lc = str(persona.get("display_name", "")).strip().lower()
+def build_debate_context(persona: Optional[dict], debate_args: list[dict]) -> str:
+    persona_lc = str((persona or {}).get("display_name", "")).strip().lower()
     if not debate_args:
         return "No prior arguments exist in this debate yet."
 
@@ -263,16 +266,57 @@ def build_debate_context(persona: dict, debate_args: list[dict]) -> str:
     for idx, arg in enumerate(debate_args, start=1):
         author = str(arg.get("author", "unknown")).strip() or "unknown"
         side = normalize_side(arg.get("side")) or "unknown"
-        mine = "OWN" if author.lower() == persona_lc else "OTHER"
+        mine = ""
+        if persona_lc:
+            mine = "OWN" if author.lower() == persona_lc else "OTHER"
         body = str(arg.get("body", "")).strip()
-        lines.append(f"[{idx}] {mine} | author={author} | side={side}\n{body}")
+        prefix = f"{mine} | " if mine else ""
+        lines.append(f"[{idx}] {prefix}author={author} | side={side}\n{body}")
     return "\n\n".join(lines)
+
+
+def normalize_non_negative_int(value) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(parsed, 0)
+
+
+def get_thread_summary(post: dict) -> str:
+    return to_one_paragraph(str(post.get("threadsummary", "") or ""))
+
+
+def get_thread_summary_arg_count(post: dict) -> int:
+    return normalize_non_negative_int(post.get("threadsummaryargcount", 0))
+
+
+def build_thread_summary_prompt_block(post: dict) -> str:
+    summary = get_thread_summary(post)
+    if not summary:
+        return ""
+    count = get_thread_summary_arg_count(post)
+    label = (
+        f"Saved neutral thread summary through {count} arguments"
+        if count > 0 else
+        "Saved neutral thread summary"
+    )
+    return f"{label}:\n{summary}\n\n"
+
+
+def resolve_summary_target_arg_count(target_arg_count: Optional[int], current_arg_count: int) -> int:
+    if target_arg_count and target_arg_count > 0:
+        return target_arg_count
+    if current_arg_count >= THREAD_SUMMARY_INTERVAL and current_arg_count % THREAD_SUMMARY_INTERVAL == 0:
+        return current_arg_count
+    return 0
 
 
 def choose_initial_side(persona: dict, post: dict, debate_args: list[dict]) -> str:
     client = OpenAIClient(api_key=OPENAI_KEY)
     title = post.get("title", "")
     body = post.get("body", "")
+    summary_block = build_thread_summary_prompt_block(post)
     context = build_debate_context(persona, debate_args)
     msg = client.chat.completions.create(
         model=MODEL,
@@ -283,6 +327,7 @@ def choose_initial_side(persona: dict, post: dict, debate_args: list[dict]) -> s
                 "role": "user",
                 "content": (
                     f"Debate title: {title}\n\nDebate body: {body}\n\n"
+                    f"{summary_block}"
                     f"All arguments in debate:\n{context}\n\n"
                     f"Pick a side for {persona['display_name']}. "
                     "Return exactly one token: for or against."
@@ -302,6 +347,7 @@ def should_switch_side(persona: dict, post: dict, current_side: str, debate_args
     client = OpenAIClient(api_key=OPENAI_KEY)
     title = post.get("title", "")
     body = post.get("body", "")
+    summary_block = build_thread_summary_prompt_block(post)
     context = build_debate_context(persona, debate_args)
     msg = client.chat.completions.create(
         model=MODEL,
@@ -313,8 +359,10 @@ def should_switch_side(persona: dict, post: dict, current_side: str, debate_args
                 "content": (
                     f"Debate title: {title}\n\nDebate body: {body}\n\n"
                     f"Current side: {current_side}\n\n"
+                    f"{summary_block}"
                     f"All arguments in debate:\n{context}\n\n"
                     "Entries labeled OWN are your prior arguments. "
+                    "Consider the whole thread, including rebuttals and follow-ups. "
                     "Largely keep that view unless opposing arguments clearly changed your mind. "
                     "Return exactly one token: switch or stay."
                 ),
@@ -346,6 +394,89 @@ def resolve_side(persona: dict, post: dict, debate_args: list[dict]) -> tuple[st
 
 # ── OpenAI content generation ─────────────────────────────────────────────────
 
+
+def generate_thread_summary(post: dict, debate_args: list[dict], target_arg_count: int) -> str:
+    client = OpenAIClient(api_key=OPENAI_KEY)
+    title = str(post.get("title", "") or "").strip()
+    body = str(post.get("body", "") or "").strip()
+    context = build_debate_context(None, debate_args)
+    payload = [
+        {
+            "role": "system",
+            "content": (
+                "You write neutral moderator summaries for debate threads. "
+                "Summarize the whole thread so far in 2 to 5 sentences. "
+                "Mention the main arguments from each side, the strongest rebuttals, and any meaningful turns in the exchange. "
+                "Do not take sides. Do not add new claims. No markdown. One paragraph only."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Debate title: {title}\n\n"
+                f"Debate body: {body}\n\n"
+                f"Summarize the first {target_arg_count} chronological arguments in this thread.\n\n"
+                f"Thread:\n{context}"
+            ),
+        },
+    ]
+
+    for attempt in range(1, MODEL_EMPTY_RETRY_ATTEMPTS + 1):
+        msg = client.chat.completions.create(
+            model=MODEL,
+            max_completion_tokens=THREAD_SUMMARY_MAX_COMPLETION_TOKENS,
+            messages=payload,
+        )
+        raw = extract_chat_completion_text(msg.choices[0].message)
+        paragraph = to_one_paragraph(raw)[:THREAD_SUMMARY_MAX_CHARS]
+        if len(paragraph) >= 3:
+            return paragraph
+        print(
+            f"  [warn] Empty thread summary from model "
+            f"(attempt {attempt}/{MODEL_EMPTY_RETRY_ATTEMPTS})."
+        )
+
+    raise RuntimeError(
+        f"Failed to generate thread summary for {post.get('id', 'unknown-post')}."
+    )
+
+
+def refresh_thread_summary(
+    sb: Client,
+    post: dict,
+    debate_args: list[dict],
+    target_arg_count: Optional[int] = None,
+) -> dict:
+    current_arg_count = len(debate_args)
+    resolved_target = resolve_summary_target_arg_count(target_arg_count, current_arg_count)
+    stored_arg_count = get_thread_summary_arg_count(post)
+
+    if not resolved_target:
+        return {"updated": False, "reason": "interval-not-reached", "target_arg_count": 0}
+    if resolved_target % THREAD_SUMMARY_INTERVAL != 0:
+        return {"updated": False, "reason": "invalid-target-arg-count", "target_arg_count": resolved_target}
+    if stored_arg_count >= resolved_target:
+        return {"updated": False, "reason": "already-up-to-date", "target_arg_count": resolved_target}
+    if current_arg_count < resolved_target:
+        return {"updated": False, "reason": "not-enough-arguments", "target_arg_count": resolved_target}
+
+    summary_args = debate_args[:resolved_target]
+    summary = generate_thread_summary(post, summary_args, resolved_target)
+    updated_at = datetime.now(timezone.utc).isoformat()
+    sb.table("posts").update({
+        "threadsummary": summary,
+        "threadsummaryargcount": resolved_target,
+        "threadsummaryupdatedat": updated_at,
+    }).eq("id", post["id"]).execute()
+    post["threadsummary"] = summary
+    post["threadsummaryargcount"] = resolved_target
+    post["threadsummaryupdatedat"] = updated_at
+    return {
+        "updated": True,
+        "target_arg_count": resolved_target,
+        "current_arg_count": current_arg_count,
+    }
+
 def generate_argument(
     persona: dict,
     post: dict,
@@ -358,6 +489,7 @@ def generate_argument(
     client = OpenAIClient(api_key=OPENAI_KEY)
     title  = post.get("title", "")
     body   = post.get("body", "")
+    summary_block = build_thread_summary_prompt_block(post)
     context = build_debate_context(persona, debate_args)
     length_desc = resolve_length_desc(response_length)
     payload = [
@@ -367,9 +499,11 @@ def generate_argument(
             "content": (
                 f"You're arguing in this debate:\nTitle: {title}\n\n{body}\n\n"
                 f"Resolved side: {side.upper()} (source: {side_source}).\n\n"
-                "All arguments currently in this debate are below. "
+                f"{summary_block}"
+                "All arguments currently in this debate are below in chronological order. "
                 "Entries marked OWN were written by you. "
-                "Largely keep your OWN view unless you are genuinely convinced to change.\n\n"
+                "Largely keep your OWN view unless you are genuinely convinced to change. "
+                "You must account for the whole thread and all prior rebuttals.\n\n"
                 f"{context}\n\n"
                 "Direct clash requirements: target at least one OTHER argument by author and claim, "
                 "state exactly why it fails, and present a stronger counter-claim. "
@@ -379,7 +513,7 @@ def generate_argument(
                 "\"<Author> said <claim>, but that's not right because <reason>.\"\n\n"
                 f"Write your argument in exactly one paragraph ({length_desc}). "
                 "No markdown. No headers. "
-                f"You must argue the {side.upper()} side."
+                f"You must argue the {side.upper()} side. "
                 "Argue hard. Make a real point. Be true to your character."
             ),
         },
@@ -541,14 +675,18 @@ def post_argument(
         body = generate_argument(persona, post, side, debate_args, side_source, response_length=response_length)
         now = datetime.now(timezone.utc).isoformat()
         arg_id = str(uuid4())
-        sb.table("arguments").insert({
-            "id":        arg_id,
-            "postid":    post["id"],
-            "side":      side,
-            "body":      body,
-            "author":    persona["display_name"],
+        new_arg = {
+            "id": arg_id,
+            "postid": post["id"],
+            "side": side,
+            "body": body,
+            "author": persona["display_name"],
             "createdat": now,
+        }
+        sb.table("arguments").insert({
+            **new_arg,
         }).execute()
+        summary_result = refresh_thread_summary(sb, post, debate_args + [new_arg], target_arg_count=len(debate_args) + 1)
         print(f"✅ {persona['display_name']} argued ({side}) on: \"{post.get('title', post['id'])}\"")
         return {
             "ok": True,
@@ -559,6 +697,8 @@ def post_argument(
             "side": side,
             "side_source": side_source,
             "argument_id": arg_id,
+            "thread_summary_updated": bool(summary_result.get("updated")),
+            "thread_summary_arg_count": int(summary_result.get("target_arg_count") or 0),
         }
     except Exception as e:
         print(f"❌ Failed to post argument: {e}")

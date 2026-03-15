@@ -12,7 +12,10 @@ const SWITCH_DECISION_MAX_ATTEMPTS = 3;
 const DECISION_MAX_COMPLETION_TOKENS = 256;
 const ARGUMENT_MAX_COMPLETION_TOKENS = 1200;
 const NEW_POST_MAX_COMPLETION_TOKENS = 900;
+const THREAD_SUMMARY_MAX_COMPLETION_TOKENS = 900;
 const MODEL_EMPTY_RETRY_ATTEMPTS = 3;
+const THREAD_SUMMARY_INTERVAL = 5;
+const THREAD_SUMMARY_MAX_CHARS = 4000;
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -210,14 +213,119 @@ async function getRecentOpposingArguments(
   return (data as Record<string, unknown>[] | null) ?? [];
 }
 
+async function getDebateArguments(
+  sb: any,
+  postId: string,
+): Promise<Record<string, unknown>[]> {
+  const { data, error } = await sb
+    .from("arguments")
+    .select("*")
+    .eq("postid", postId)
+    .order("createdat", { ascending: true });
+  if (error) {
+    console.warn(`  Could not fetch debate arguments for ${postId}: ${error.message}`);
+    return [];
+  }
+  return (data as Record<string, unknown>[] | null) ?? [];
+}
+
+function getOwnLastArgument(
+  debateArgs: Record<string, unknown>[],
+  personaName: string,
+): Record<string, unknown> | null {
+  const target = String(personaName ?? "").trim().toLowerCase();
+  if (!target) return null;
+  for (let i = debateArgs.length - 1; i >= 0; i--) {
+    const author = String(debateArgs[i]?.author ?? "").trim().toLowerCase();
+    if (author === target) return debateArgs[i];
+  }
+  return null;
+}
+
+function getOpposingArgumentsSince(
+  debateArgs: Record<string, unknown>[],
+  currentSide: Side,
+  personaName: string,
+  createdAfter: unknown,
+): Record<string, unknown>[] {
+  const target = String(personaName ?? "").trim().toLowerCase();
+  const threshold = String(createdAfter ?? "").trim();
+  const thresholdTime = threshold ? Date.parse(threshold) : Number.NaN;
+  return debateArgs.filter((arg) => {
+    if (normalizeSide(arg.side) !== oppositeSide(currentSide)) return false;
+    if (String(arg.author ?? "").trim().toLowerCase() === target) return false;
+    if (!threshold) return true;
+    const createdAt = Date.parse(String(arg.createdat ?? ""));
+    return Number.isFinite(createdAt) && Number.isFinite(thresholdTime) && createdAt > thresholdTime;
+  });
+}
+
+function normalizeNonNegativeInteger(raw: unknown): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.floor(value);
+}
+
+function getStoredThreadSummary(post: Record<string, unknown>): string {
+  return toOneParagraph(post.threadsummary ?? "");
+}
+
+function getStoredThreadSummaryArgCount(post: Record<string, unknown>): number {
+  return normalizeNonNegativeInteger(post.threadsummaryargcount);
+}
+
+function buildThreadSummaryPromptBlock(
+  post: Record<string, unknown>,
+): string {
+  const summary = getStoredThreadSummary(post);
+  if (!summary) return "";
+  const count = getStoredThreadSummaryArgCount(post);
+  const label = count > 0
+    ? `Saved neutral thread summary through ${count} arguments`
+    : "Saved neutral thread summary";
+  return `${label}:\n${summary}\n\n`;
+}
+
+function buildDebateContext(
+  debateArgs: Record<string, unknown>[],
+  personaName?: string,
+): string {
+  if (!debateArgs.length) return "No prior arguments exist in this debate yet.";
+  const personaLc = String(personaName ?? "").trim().toLowerCase();
+  return debateArgs.map((arg, idx) => {
+    const author = String(arg.author ?? "unknown").trim() || "unknown";
+    const side = normalizeSide(arg.side) ?? "unknown";
+    const mine = personaLc
+      ? (author.toLowerCase() === personaLc ? "OWN" : "OTHER") + " | "
+      : "";
+    const body = String(arg.body ?? "").trim();
+    return `[${idx + 1}] ${mine}author=${author} | side=${side}\n${body}`;
+  }).join("\n\n");
+}
+
+function resolveSummaryTargetArgCount(
+  targetArgCountRaw: unknown,
+  currentArgCount: number,
+): number {
+  const parsed = normalizeNonNegativeInteger(targetArgCountRaw);
+  if (parsed > 0) return parsed;
+  if (currentArgCount >= THREAD_SUMMARY_INTERVAL && currentArgCount % THREAD_SUMMARY_INTERVAL === 0) {
+    return currentArgCount;
+  }
+  return 0;
+}
+
 async function classifyInitialSide(
   ai: OpenAI,
   persona: Persona,
   post: Record<string, unknown>,
+  debateArgs: Record<string, unknown>[],
 ): Promise<{ side: Side; source: string }> {
   const postId = String(post.id ?? "").trim();
   const title = post.title ?? "";
   const body = post.body ?? "";
+  const summaryBlock = buildThreadSummaryPromptBlock(post);
+  const context = buildDebateContext(debateArgs);
   const fallbackKey = `${persona.display_name}|${postId || String(title)}`;
   const promptVariants = [
     { role: "system" as const, content: persona.prompt_style },
@@ -241,6 +349,8 @@ async function classifyInitialSide(
             role: "user",
             content:
               `Debate title: ${title}\n\nDebate body: ${body}\n\n` +
+              summaryBlock +
+              `All arguments in this debate so far:\n${context}\n\n` +
               `Which side should ${persona.display_name} take in character? ` +
               `Return exactly one token: for or against.`,
           },
@@ -265,11 +375,14 @@ async function shouldSwitchSide(
   currentSide: Side,
   ownLastArg: Record<string, unknown>,
   opposingArgs: Record<string, unknown>[],
+  debateArgs: Record<string, unknown>[],
 ): Promise<boolean> {
   if (!opposingArgs.length) return false;
 
   const title = post.title ?? "";
   const body = post.body ?? "";
+  const summaryBlock = buildThreadSummaryPromptBlock(post);
+  const fullContext = buildDebateContext(debateArgs, persona.display_name);
   const ownBody = toOneParagraph(String(ownLastArg.body ?? "")).slice(0, 1200);
   const opposingBlob = opposingArgs.slice(0, 3).map((arg, idx) => {
     const argBody = toOneParagraph(String(arg.body ?? "")).slice(0, 800);
@@ -295,8 +408,12 @@ async function shouldSwitchSide(
           content:
             `Debate title: ${title}\n\nDebate body: ${body}\n\n` +
             `Current side: ${currentSide}\n\n` +
+            summaryBlock +
+            `Full chronological thread:\n${fullContext}\n\n` +
             `Your last argument:\n${ownBody}\n\n` +
             `New opposing arguments:\n${opposingBlob}\n\n` +
+            `Entries marked OWN were written by you. Consider the entire thread, ` +
+            `including rebuttals and follow-ups, not just the latest replies.\n\n` +
             `If the opposing case is genuinely stronger and you are convinced, return switch. ` +
             `Otherwise return stay. Return exactly one token: switch or stay.`,
         },
@@ -316,9 +433,9 @@ async function shouldSwitchSide(
 
 async function resolvePersonaSide(
   ai: OpenAI,
-  sb: any,
   persona: Persona,
   post: Record<string, unknown>,
+  debateArgs: Record<string, unknown>[],
 ): Promise<{ side: Side; source: string }> {
   const postId = String(post.id ?? "");
   if (!postId) return { side: "for", source: "initial-model" };
@@ -327,25 +444,27 @@ async function resolvePersonaSide(
     return { side: "for", source: "paul-authored-debate" };
   }
 
-  const ownLastArg = await getLastPersonaArgument(sb, postId, persona.display_name);
+  const ownLastArg = getOwnLastArgument(debateArgs, persona.display_name);
   if (ownLastArg) {
     const currentSide = normalizeSide(ownLastArg.side);
     if (currentSide) {
-      const opposingArgs = await getRecentOpposingArguments(
-        sb,
-        postId,
+      const opposingArgs = getOpposingArgumentsSince(
+        debateArgs,
         currentSide,
         persona.display_name,
         ownLastArg.createdat,
       );
-      if (opposingArgs.length && await shouldSwitchSide(ai, persona, post, currentSide, ownLastArg, opposingArgs)) {
+      if (
+        opposingArgs.length &&
+        await shouldSwitchSide(ai, persona, post, currentSide, ownLastArg, opposingArgs, debateArgs)
+      ) {
         return { side: oppositeSide(currentSide), source: "mind-change-switch" };
       }
       return { side: currentSide, source: "stick-with-prior" };
     }
   }
 
-  const initial = await classifyInitialSide(ai, persona, post);
+  const initial = await classifyInitialSide(ai, persona, post, debateArgs);
   return { side: initial.side, source: initial.source };
 }
 
@@ -367,6 +486,134 @@ function buildFallbackArgument(side: Side, post: Record<string, unknown>): strin
   );
 }
 
+async function generateThreadSummary(
+  ai: OpenAI,
+  post: Record<string, unknown>,
+  debateArgs: Record<string, unknown>[],
+  targetArgCount: number,
+): Promise<string> {
+  const title = String(post.title ?? "").trim();
+  const body = String(post.body ?? "").trim();
+  const context = buildDebateContext(debateArgs);
+  const request = {
+    model: MODEL,
+    max_completion_tokens: THREAD_SUMMARY_MAX_COMPLETION_TOKENS,
+    messages: [
+      {
+        role: "system" as const,
+        content:
+          "You write neutral moderator summaries for debate threads. " +
+          "Summarize the whole thread so far in 2 to 5 sentences. " +
+          "Mention the main arguments from each side, the strongest rebuttals, and any meaningful turns in the exchange. " +
+          "Do not take sides. Do not add new claims. No markdown. One paragraph only.",
+      },
+      {
+        role: "user" as const,
+        content:
+          `Debate title: ${title}\n\n` +
+          `Debate body: ${body}\n\n` +
+          `Summarize the first ${targetArgCount} chronological arguments in this thread.\n\n` +
+          `Thread:\n${context}`,
+      },
+    ],
+  };
+
+  for (let attempt = 1; attempt <= MODEL_EMPTY_RETRY_ATTEMPTS; attempt++) {
+    const msg = await ai.chat.completions.create(request);
+    const raw = extractChatMessageText(msg.choices[0].message);
+    const paragraph = toOneParagraph(raw).slice(0, THREAD_SUMMARY_MAX_CHARS);
+    if (paragraph.length >= 3) return paragraph;
+    console.warn(
+      `  [warn] Empty thread summary from model ` +
+      `(attempt ${attempt}/${MODEL_EMPTY_RETRY_ATTEMPTS}).`,
+    );
+  }
+
+  throw new Error(`Failed to generate thread summary for ${String(post.id ?? "unknown-post")}.`);
+}
+
+async function refreshThreadSummaryForPost(
+  ai: OpenAI,
+  sb: any,
+  post: Record<string, unknown>,
+  targetArgCountRaw?: unknown,
+  preloadedArgs?: Record<string, unknown>[],
+): Promise<Record<string, unknown>> {
+  const postId = String(post.id ?? "").trim();
+  if (!postId) {
+    return { updated: false, reason: "missing-post-id", current_arg_count: 0, target_arg_count: 0 };
+  }
+
+  const debateArgs = preloadedArgs ?? await getDebateArguments(sb, postId);
+  const currentArgCount = debateArgs.length;
+  const targetArgCount = resolveSummaryTargetArgCount(targetArgCountRaw, currentArgCount);
+  const storedArgCount = getStoredThreadSummaryArgCount(post);
+
+  if (!targetArgCount) {
+    return {
+      updated: false,
+      reason: "interval-not-reached",
+      current_arg_count: currentArgCount,
+      target_arg_count: 0,
+      stored_arg_count: storedArgCount,
+    };
+  }
+  if (targetArgCount % THREAD_SUMMARY_INTERVAL !== 0) {
+    return {
+      updated: false,
+      reason: "invalid-target-arg-count",
+      current_arg_count: currentArgCount,
+      target_arg_count: targetArgCount,
+      stored_arg_count: storedArgCount,
+    };
+  }
+  if (storedArgCount >= targetArgCount) {
+    return {
+      updated: false,
+      reason: "already-up-to-date",
+      current_arg_count: currentArgCount,
+      target_arg_count: targetArgCount,
+      stored_arg_count: storedArgCount,
+    };
+  }
+  if (currentArgCount < targetArgCount) {
+    return {
+      updated: false,
+      reason: "not-enough-arguments",
+      current_arg_count: currentArgCount,
+      target_arg_count: targetArgCount,
+      stored_arg_count: storedArgCount,
+    };
+  }
+
+  const summaryArgs = debateArgs.slice(0, targetArgCount);
+  const summary = await generateThreadSummary(ai, post, summaryArgs, targetArgCount);
+  const updatedAt = new Date().toISOString();
+  const { error } = await sb
+    .from("posts")
+    .update({
+      threadsummary: summary,
+      threadsummaryargcount: targetArgCount,
+      threadsummaryupdatedat: updatedAt,
+    })
+    .eq("id", postId);
+  if (error) {
+    throw new Error(`Failed to store thread summary: ${error.message}`);
+  }
+
+  post.threadsummary = summary;
+  post.threadsummaryargcount = targetArgCount;
+  post.threadsummaryupdatedat = updatedAt;
+
+  return {
+    updated: true,
+    current_arg_count: currentArgCount,
+    target_arg_count: targetArgCount,
+    stored_arg_count: targetArgCount,
+    summary,
+  };
+}
+
 // ── Content generation ────────────────────────────────────────────────────────
 
 async function generateArgument(
@@ -374,11 +621,15 @@ async function generateArgument(
   persona: Persona,
   post: Record<string, unknown>,
   side: Side,
+  debateArgs: Record<string, unknown>[],
+  sideSource: string,
   responseLength?: string | null,
   hint?: string | null,
 ): Promise<string> {
   const title = post.title ?? "";
   const body  = post.body ?? "";
+  const summaryBlock = buildThreadSummaryPromptBlock(post);
+  const context = buildDebateContext(debateArgs, persona.display_name);
   const hintLine = hint ? `\n\nGuidance from the organizer: ${hint}` : "";
   const request = {
     model: MODEL,
@@ -389,8 +640,15 @@ async function generateArgument(
         role: "user" as const,
         content:
           `You're arguing in this debate:\nTitle: ${title}\n\n${body}\n\n` +
+          `Resolved side: ${side.toUpperCase()} (source: ${sideSource}).\n\n` +
+          summaryBlock +
+          `All arguments currently in this debate are below in chronological order. ` +
+          `Entries marked OWN were written by you. ` +
+          `You must account for the whole thread and all prior rebuttals.\n\n` +
+          `${context}\n\n` +
           `You must argue the ${side.toUpperCase()} side. Do not switch sides.\n\n` +
           `Write your argument in exactly one paragraph (${resolveResponseLengthDesc(responseLength)}). No markdown. No headers. ` +
+          `Target at least one OTHER argument by author and claim, explain why it fails, and advance a stronger counter-claim. ` +
           `Argue hard. Make a real point. Be true to your character.` +
           hintLine,
       },
@@ -682,13 +940,15 @@ async function runArgumentAction(
   hint?: string | null,
 ): Promise<Record<string, unknown>> {
   const forcedSide = normalizeSide(forcedSideRaw);
+  const postId = String(post.id ?? "").trim();
+  const debateArgs = postId ? await getDebateArguments(sb, postId) : [];
   let side: Side;
   let sideSource = "forced-side";
 
   if (forcedSide) {
     side = forcedSide;
   } else {
-    const resolution = await resolvePersonaSide(ai, sb, persona, post);
+    const resolution = await resolvePersonaSide(ai, persona, post, debateArgs);
     side = resolution.side;
     sideSource = resolution.source;
   }
@@ -696,26 +956,36 @@ async function runArgumentAction(
   console.log(`   Action: argue on "${post.title ?? post.id}"`);
   console.log(`   Side: ${side} (${sideSource})`);
 
-  const body = await generateArgument(ai, persona, post, side, responseLength, hint);
+  const body = await generateArgument(ai, persona, post, side, debateArgs, sideSource, responseLength, hint);
   if (body.trim().length < 3) {
     throw new Error("Generated argument body was empty.");
   }
 
   const argId = crypto.randomUUID();
   const now = new Date().toISOString();
-  const { error } = await sb.from("arguments").insert({
+  const newArg = {
     id: argId,
     postid: post.id,
     side,
     body,
     author: persona.display_name,
     createdat: now,
+  };
+  const { error } = await sb.from("arguments").insert({
+    ...newArg,
   });
   if (error) {
     throw new Error(`Failed to post argument: ${error.message}`);
   }
 
   await incrementPostArgumentCounters(sb, String(post.id), side);
+  const summaryResult = await refreshThreadSummaryForPost(
+    ai,
+    sb,
+    post,
+    debateArgs.length + 1,
+    [...debateArgs, newArg],
+  );
   console.log(`✅ ${persona.display_name} argued (${side}) on: "${post.title ?? post.id}"`);
   return {
     action: "argue",
@@ -725,6 +995,8 @@ async function runArgumentAction(
     side,
     side_source: sideSource,
     argument_id: argId,
+    thread_summary_updated: !!summaryResult.updated,
+    thread_summary_arg_count: summaryResult.target_arg_count ?? 0,
   };
 }
 
@@ -987,6 +1259,23 @@ Deno.serve(async (req) => {
       const ai = new OpenAI({ apiKey: openaiKey });
       const searchResult = await runSearchAction(ai, sb, String(reqBody.query ?? ""));
       return jsonResponse({ ok: true, ...searchResult });
+    }
+
+    if (reqBody?.mode === "refresh-thread-summary") {
+      if (!openaiKey) {
+        return jsonResponse({ ok: false, error: "Missing OPENAI_API_KEY" }, 500);
+      }
+      const postId = String(reqBody.postId ?? reqBody.post_id ?? "").trim();
+      if (!postId) {
+        return jsonResponse({ ok: false, error: "refresh-thread-summary requires postId." }, 400);
+      }
+      const post = await getPostById(sb, postId);
+      if (!post) {
+        return jsonResponse({ ok: false, error: `Debate not found: ${postId}` }, 404);
+      }
+      const ai = new OpenAI({ apiKey: openaiKey });
+      const summaryResult = await refreshThreadSummaryForPost(ai, sb, post, reqBody.targetArgCount ?? reqBody.target_arg_count);
+      return jsonResponse({ ok: true, post_id: postId, ...summaryResult });
     }
 
     const claimed = await claimPendingUiAction(sb, requestedActionId);
