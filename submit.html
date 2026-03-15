@@ -279,6 +279,30 @@
         <div class="field-error" id="err-body">Please write a body for your post.</div>
       </div>
 
+      <!-- DEBATE-ONLY FIELDS -->
+      <div class="debate-fields" id="debate-fields">
+        <div id="for-auto-note" style="display:none; background:rgba(53,143,101,0.08); border:1px solid rgba(53,143,101,0.25); border-radius:3px; padding:10px 14px; font-family:'Cinzel',serif; font-size:11px; letter-spacing:0.1em; color:var(--green); margin-bottom:28px;">✦ You are automatically For your thesis. Others may argue either side.</div>
+
+        <div id="confidence-block" style="display:none;">
+          <div class="field-group">
+            <label class="field-label">Confidence Level <span class="field-required">*</span></label>
+            <p class="field-hint">How certain are you? 0 = barely leaning, 100 = fully convinced.</p>
+            <div class="conf-row">
+              <input type="range" class="conf-slider" min="0" max="100" value="60" id="conf-slider" oninput="updateConf(this)">
+              <div class="conf-value" id="conf-val">60%</div>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label">What Would Change Your Mind? <span class="field-required">*</span></label>
+            <p class="field-hint">Required if you've taken a position. Positions without conditions are not arguments.</p>
+            <textarea id="post-change" rows="3" placeholder="e.g. Evidence showing that X leads to Y in peer-reviewed studies over 10+ years..."></textarea>
+            <div class="field-error" id="err-change">Please state what would change your mind.</div>
+          </div>
+        </div>
+
+      </div>
+
       <!-- TAGS -->
       <div class="field-group">
         <label class="field-label">Tags <span class="field-required">*</span> <span class="optional-badge">(minimum 2)</span></label>
@@ -300,36 +324,6 @@
         </div>
         <div class="tag-count-hint" id="tag-count-hint">0 tags added — need at least 2</div>
         <div class="field-error" id="err-tags">Add at least 2 tags before posting.</div>
-      </div>
-
-      <!-- DEBATE-ONLY FIELDS -->
-      <div class="debate-fields" id="debate-fields">
-        <hr class="section-divider">
-        <p style="font-family:'Cinzel',serif; font-size:11px; letter-spacing:0.2em; text-transform:uppercase; color:var(--red); margin-bottom:24px;">Debate Settings</p>
-
-        <div class="field-group">
-          <label class="field-label">Your Position</label>
-          <div id="for-auto-note" style="display:none; background:rgba(53,143,101,0.08); border:1px solid rgba(53,143,101,0.25); border-radius:3px; padding:10px 14px; font-family:'Cinzel',serif; font-size:11px; letter-spacing:0.1em; color:var(--green);">✦ You are automatically For your thesis. Others may argue either side.</div>
-        </div>
-
-        <div id="confidence-block" style="display:none;">
-          <div class="field-group">
-            <label class="field-label">Confidence Level</label>
-            <p class="field-hint">How certain are you? 0 = barely leaning, 100 = fully convinced.</p>
-            <div class="conf-row">
-              <input type="range" class="conf-slider" min="0" max="100" value="60" id="conf-slider" oninput="updateConf(this)">
-              <div class="conf-value" id="conf-val">60%</div>
-            </div>
-          </div>
-
-          <div class="field-group">
-            <label class="field-label">What Would Change Your Mind? <span class="field-required">*</span></label>
-            <p class="field-hint">Required if you've taken a position. Positions without conditions are not arguments.</p>
-            <textarea id="post-change" rows="3" placeholder="e.g. Evidence showing that X leads to Y in peer-reviewed studies over 10+ years..."></textarea>
-            <div class="field-error" id="err-change">Please state what would change your mind.</div>
-          </div>
-        </div>
-
       </div>
 
       <!-- SUBMIT -->
