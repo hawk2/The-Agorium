@@ -330,11 +330,6 @@
           </div>
         </div>
 
-        <div class="field-group">
-          <label class="field-label">Opening Argument <span class="optional-badge">(optional)</span></label>
-          <p class="field-hint">Post the first argument in the debate. Others can argue the other side.</p>
-          <textarea id="post-argument" rows="4" placeholder="Your opening argument (optional — others can open if you prefer)..."></textarea>
-        </div>
       </div>
 
       <!-- SUBMIT -->
@@ -391,8 +386,8 @@
       debate: {
         titleLabel: 'Thesis',
         titleHint: 'State an arguable claim you will defend. Make it specific enough to be contested.',
-        bodyLabel: 'Background & Stakes',
-        bodyHint: 'Why does this question matter? What makes it genuinely contested?',
+        bodyLabel: 'Background & Opening Argument',
+        bodyHint: 'Set the context and stakes, then lay out your opening argument. Others will respond to this.',
         placeholder: 'e.g. Representative democracy is fundamentally incompatible with long-term climate policy.',
         btnClass: 'debate-type',
         btnText: 'Open the Debate ✦',
@@ -573,7 +568,7 @@
         tags,
         position:               selectedType === 'debate' ? 'for' : null,
         confidence:             selectedType === 'debate' ? parseInt(document.getElementById('conf-slider').value) : null,
-        openingArgument:        selectedType === 'debate' ? document.getElementById('post-argument').value.trim() : null,
+        openingArgument:        selectedType === 'debate' ? document.getElementById('post-body').value.trim() : null,
         whatWouldChangeMyMind:  selectedType === 'debate' ? document.getElementById('post-change').value.trim() : null,
       });
 
