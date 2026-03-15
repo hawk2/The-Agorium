@@ -7,7 +7,6 @@ const PAUL_NAME = "RighteousPaul";
 type Side = (typeof SIDES)[number];
 type BotAction = "argue" | "new";
 const BOT_UI_ACTION_MAX_CLAIM_ATTEMPTS = 5;
-const PREDICT_SIDE_MAX_ATTEMPTS = 3;
 const SIDE_CLASSIFY_MAX_ATTEMPTS = 3;
 const SWITCH_DECISION_MAX_ATTEMPTS = 3;
 const DECISION_MAX_COMPLETION_TOKENS = 256;
@@ -56,7 +55,10 @@ const PERSONAS = {
       "You find religious-based arguments frustrating and say so diplomatically. " +
       "You're sharp, a little self-righteous, but you always bring receipts. " +
       "Use phrases like 'the data actually shows', 'that's a category error', 'empirically speaking'. " +
-      "Push for systemic solutions. Call out logical fallacies by name.",
+      "Push for systemic solutions. Call out logical fallacies by name. " +
+      "Never cite Scripture, Bible verses, God, Jesus, church, or Christian doctrine. " +
+      "Never invoke the Founders, natural law, or religious authority. " +
+      "Stay analytical and evidence-based at all times.",
   },
   VibezOfChaos: {
     display_name: "VibezOfChaos",
@@ -73,11 +75,6 @@ const PERSONAS = {
 
 type PersonaKey = keyof typeof PERSONAS;
 type Persona = (typeof PERSONAS)[PersonaKey];
-
-function isAthenaEquivalent(persona: Persona): boolean {
-  const name = String(persona.display_name).toLowerCase();
-  return name === "athena" || name === "atheareason";
-}
 
 // ── User helper ───────────────────────────────────────────────────────────────
 
@@ -108,25 +105,6 @@ function oppositeSide(side: Side): Side {
 
 function isPaulAuthor(raw: unknown): boolean {
   return String(raw ?? "").trim().toLowerCase() === PAUL_NAME.toLowerCase();
-}
-
-async function getLatestPaulArgument(
-  sb: any,
-  postId: string,
-): Promise<Record<string, unknown> | null> {
-  const { data, error } = await sb
-    .from("arguments")
-    .select("*")
-    .eq("postid", postId)
-    .eq("author", PAUL_NAME)
-    .order("createdat", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    console.warn(`  Could not fetch latest ${PAUL_NAME} argument: ${error.message}`);
-    return null;
-  }
-  return (data as Record<string, unknown> | null) ?? null;
 }
 
 function parseSideChoice(raw: unknown): Side | null {
@@ -185,90 +163,6 @@ function extractChatMessageText(message: unknown): string {
   const refusal = msg.refusal;
   if (typeof refusal === "string") return refusal;
   return "";
-}
-
-async function predictPaulSide(
-  ai: OpenAI,
-  post: Record<string, unknown>,
-): Promise<{ side: Side; source: string }> {
-  const postId = String(post.id ?? "").trim();
-  const title = post.title ?? "";
-  const body = post.body ?? "";
-  const fallbackKey = `${PAUL_NAME}|${postId || String(title)}`;
-
-  const promptVariants = [
-    { role: "system" as const, content: PERSONAS.RighteousPaul.prompt_style },
-    {
-      role: "system" as const,
-      content: "You are classifying likely stance for RighteousPaul. Respond with one token only: for or against.",
-    },
-  ];
-
-  const votes: Side[] = [];
-  for (const systemPrompt of promptVariants) {
-    for (let i = 0; i < PREDICT_SIDE_MAX_ATTEMPTS; i++) {
-      const msg = await ai.chat.completions.create({
-        model: MODEL,
-        max_completion_tokens: DECISION_MAX_COMPLETION_TOKENS,
-        messages: [
-          systemPrompt,
-          {
-            role: "user",
-            content:
-              `Debate title: ${title}\n\nDebate body: ${body}\n\n` +
-              `Which side would RighteousPaul most likely take? Return exactly one token: for or against.`,
-          },
-        ],
-      });
-      const parsed = parseSideChoice(extractChatMessageText(msg.choices[0].message));
-      if (parsed) votes.push(parsed);
-    }
-  }
-  if (votes.length && votes.every((v) => v === votes[0])) {
-    return { side: votes[0], source: "anti-paul-predicted" };
-  }
-  const fallbackSide = deterministicSideFromKey(fallbackKey);
-  console.warn(`  [debug] Using hash fallback for predicted Paul side: ${fallbackSide} (votes=${JSON.stringify(votes)})`);
-  return { side: fallbackSide, source: "anti-paul-predicted-hash" };
-}
-
-async function resolveAthenaInitialSide(
-  ai: OpenAI,
-  sb: any,
-  post: Record<string, unknown>,
-): Promise<{ side: Side; source: string; paulContext: string | null; mentionPaul: boolean }> {
-  const postId = String(post.id ?? "");
-  if (!postId) return { side: "for", source: "initial-model", paulContext: null, mentionPaul: false };
-
-  const latestPaul = await getLatestPaulArgument(sb, postId);
-  if (latestPaul) {
-    const paulSide = normalizeSide(latestPaul.side);
-    if (paulSide) {
-      return {
-        side: oppositeSide(paulSide),
-        source: "anti-paul-latest-argument",
-        paulContext: String(latestPaul.body ?? "").slice(0, 600),
-        mentionPaul: true,
-      };
-    }
-  }
-
-  if (isPaulAuthor(post.author)) {
-    return {
-      side: "against",
-      source: "anti-paul-authored-debate",
-      paulContext: null,
-      mentionPaul: false,
-    };
-  }
-
-  const predictedPaul = await predictPaulSide(ai, post);
-  return {
-    side: oppositeSide(predictedPaul.side),
-    source: predictedPaul.source,
-    paulContext: null,
-    mentionPaul: false,
-  };
 }
 
 async function getLastPersonaArgument(
@@ -425,12 +319,12 @@ async function resolvePersonaSide(
   sb: any,
   persona: Persona,
   post: Record<string, unknown>,
-): Promise<{ side: Side; source: string; paulContext: string | null; mentionPaul: boolean }> {
+): Promise<{ side: Side; source: string }> {
   const postId = String(post.id ?? "");
-  if (!postId) return { side: "for", source: "initial-model", paulContext: null, mentionPaul: false };
+  if (!postId) return { side: "for", source: "initial-model" };
 
   if (persona.display_name === PAUL_NAME && isPaulAuthor(post.author)) {
-    return { side: "for", source: "paul-authored-debate", paulContext: null, mentionPaul: false };
+    return { side: "for", source: "paul-authored-debate" };
   }
 
   const ownLastArg = await getLastPersonaArgument(sb, postId, persona.display_name);
@@ -445,17 +339,14 @@ async function resolvePersonaSide(
         ownLastArg.createdat,
       );
       if (opposingArgs.length && await shouldSwitchSide(ai, persona, post, currentSide, ownLastArg, opposingArgs)) {
-        return { side: oppositeSide(currentSide), source: "mind-change-switch", paulContext: null, mentionPaul: false };
+        return { side: oppositeSide(currentSide), source: "mind-change-switch" };
       }
-      return { side: currentSide, source: "stick-with-prior", paulContext: null, mentionPaul: false };
+      return { side: currentSide, source: "stick-with-prior" };
     }
   }
 
-  if (isAthenaEquivalent(persona)) {
-    return await resolveAthenaInitialSide(ai, sb, post);
-  }
   const initial = await classifyInitialSide(ai, persona, post);
-  return { side: initial.side, source: initial.source, paulContext: null, mentionPaul: false };
+  return { side: initial.side, source: initial.source };
 }
 
 function toOneParagraph(text: unknown): string {
@@ -483,29 +374,20 @@ async function generateArgument(
   persona: Persona,
   post: Record<string, unknown>,
   side: Side,
-  paulContext: string | null,
-  mentionPaul: boolean,
   responseLength?: string | null,
 ): Promise<string> {
   const title = post.title ?? "";
   const body  = post.body ?? "";
-  const rebuttalBlock = mentionPaul && paulContext
-    ? `\n\n${PAUL_NAME}'s latest argument to rebut:\n${paulContext}\nAddress this directly and explain why it is wrong.`
-    : "";
-  const systemPrompt = isAthenaEquivalent(persona)
-    ? `${persona.prompt_style}\n\nHard constraints:\n- Never cite Scripture, Bible verses, God, Jesus, church, or Christian doctrine.\n- Never invoke the Founders, natural law, or religious authority.\n- Stay analytical and strategic.`
-    : persona.prompt_style;
   const request = {
     model: MODEL,
     max_completion_tokens: ARGUMENT_MAX_COMPLETION_TOKENS,
     messages: [
-      { role: "system" as const, content: systemPrompt },
+      { role: "system" as const, content: persona.prompt_style },
       {
         role: "user" as const,
         content:
           `You're arguing in this debate:\nTitle: ${title}\n\n${body}\n\n` +
-          `You must argue the ${side.toUpperCase()} side. Do not switch sides.` +
-          `${rebuttalBlock}\n\n` +
+          `You must argue the ${side.toUpperCase()} side. Do not switch sides.\n\n` +
           `Write your argument in exactly one paragraph (${resolveResponseLengthDesc(responseLength)}). No markdown. No headers. ` +
           `Argue hard. Make a real point. Be true to your character.`,
       },
@@ -596,14 +478,11 @@ async function generateNewPost(
   persona: Persona,
   responseLength?: string | null,
 ): Promise<{ title: string; body: string }> {
-  const systemPrompt = isAthenaEquivalent(persona)
-    ? `${persona.prompt_style}\n\nHard constraints:\n- Never cite Scripture, Bible verses, God, Jesus, church, or Christian doctrine.\n- Never invoke the Founders, natural law, or religious authority.\n- Stay analytical and strategic.`
-    : persona.prompt_style;
   const request = {
     model: MODEL,
     max_completion_tokens: NEW_POST_MAX_COMPLETION_TOKENS,
     messages: [
-      { role: "system" as const, content: systemPrompt },
+      { role: "system" as const, content: persona.prompt_style },
       {
         role: "user" as const,
         content:
@@ -733,8 +612,6 @@ async function runArgumentAction(
   const forcedSide = normalizeSide(forcedSideRaw);
   let side: Side;
   let sideSource = "forced-side";
-  let paulContext: string | null = null;
-  let mentionPaul = false;
 
   if (forcedSide) {
     side = forcedSide;
@@ -742,22 +619,12 @@ async function runArgumentAction(
     const resolution = await resolvePersonaSide(ai, sb, persona, post);
     side = resolution.side;
     sideSource = resolution.source;
-    paulContext = resolution.paulContext;
-    mentionPaul = resolution.mentionPaul;
   }
 
   console.log(`   Action: argue on "${post.title ?? post.id}"`);
   console.log(`   Side: ${side} (${sideSource})`);
 
-  const body = await generateArgument(
-    ai,
-    persona,
-    post,
-    side,
-    paulContext,
-    mentionPaul,
-    responseLength,
-  );
+  const body = await generateArgument(ai, persona, post, side, responseLength);
   if (body.trim().length < 3) {
     throw new Error("Generated argument body was empty.");
   }
