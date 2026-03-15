@@ -413,6 +413,63 @@ def generate_argument(
     return build_fallback_argument(side, post)
 
 
+def _parse_new_post_output(raw: str) -> Optional[tuple[str, str]]:
+    """
+    Robustly extract (title, body) from model output.
+
+    Handles common generation quirks:
+      - Leading blank lines before the title
+      - Markdown headers (## Title)
+      - Bold wrappers (**Title**)
+      - Label prefixes (Title: / Debate: / Resolution:)
+      - Quoted titles ("Title")
+    Returns None if a usable title+body pair can't be found.
+    """
+    if not raw or not raw.strip():
+        return None
+
+    lines = raw.strip().split("\n")
+
+    def clean_title_line(s: str) -> str:
+        s = s.strip()
+        s = re.sub(r'^#+\s*', '', s)                          # ## Heading → Heading
+        s = re.sub(r'^\*\*(.+)\*\*$', r'\1', s)               # **Bold** → Bold
+        s = re.sub(r'^__(.+)__$', r'\1', s)                   # __Bold__ → Bold
+        s = re.sub(
+            r'^(title|debate|topic|question|resolution)\s*:\s*',
+            '', s, flags=re.IGNORECASE,
+        )
+        return s.strip().strip('"\'')
+
+    # Find first non-empty line that makes a plausible title
+    title = ""
+    title_idx = 0
+    for i, line in enumerate(lines):
+        candidate = clean_title_line(line)
+        if len(candidate) >= 3:
+            title = candidate[:220]
+            title_idx = i
+            break
+
+    if not title:
+        return None
+
+    # Everything after the title is body; skip blank separator lines
+    body_lines = lines[title_idx + 1:]
+    start = 0
+    for i, line in enumerate(body_lines):
+        if line.strip():
+            start = i
+            break
+
+    body = to_one_paragraph(" ".join(body_lines[start:]))
+
+    if len(body) >= 3:
+        return title, body[:5000]
+
+    return None
+
+
 def generate_new_post(persona: dict, response_length: Optional[str] = None) -> tuple[str, str]:
     """Generate a new debate post. Returns (title, body)."""
     client = OpenAIClient(api_key=OPENAI_KEY)
@@ -425,8 +482,8 @@ def generate_new_post(persona: dict, response_length: Optional[str] = None) -> t
             "content": (
                 "Start a brand-new debate on a topic you genuinely care about. "
                 "Pick something political, ethical, or social — something real and contentious. "
-                f"Format: first line is the TITLE only (no label), blank line, then exactly one paragraph "
-                f"({length_desc}). "
+                f"Format: first line is the TITLE only (no label, no markdown), blank line, "
+                f"then exactly one paragraph ({length_desc}). "
                 "No markdown. Be opinionated. Don't be bland."
             ),
         },
@@ -446,15 +503,13 @@ def generate_new_post(persona: dict, response_length: Optional[str] = None) -> t
             )
             continue
 
-        lines = raw.split("\n", 1)
-        title = lines[0].strip()
-        body = to_one_paragraph(lines[1] if len(lines) > 1 else raw)
-        if len(title) >= 3 and len(body) >= 3:
-            return title[:220], body[:5000]
+        parsed = _parse_new_post_output(raw)
+        if parsed:
+            return parsed
 
         print(
             f"  [warn] Incomplete new-post output from model "
-            f"(attempt {attempt}/{MODEL_EMPTY_RETRY_ATTEMPTS})."
+            f"(attempt {attempt}/{MODEL_EMPTY_RETRY_ATTEMPTS}). raw={raw[:120]!r}"
         )
 
     print("  [warn] Using deterministic fallback debate post.")
