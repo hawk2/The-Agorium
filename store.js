@@ -15,6 +15,10 @@
   // ── CONFIG — paste your values from Supabase → Settings → API ──────────────
   const SUPABASE_URL = 'https://auboquhnqswseneeosyj.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_j13mrxvpNWC12QhJFSVPYQ_Q-kdsL0s';
+  // Canonical production URL used for email confirmation redirects.
+  // Must point to a publicly accessible page — never a Vercel preview URL
+  // (those require Vercel auth and will intercept confirmation links).
+  const SITE_URL = 'https://the-agorium.vercel.app';
   // ────────────────────────────────────────────────────────────────────────────
 
   const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -59,7 +63,7 @@
   }
 
   function buildEmailConfirmRedirectUrl() {
-    const url = new URL('auth.html', window.location.href);
+    const url = new URL('auth.html', SITE_URL + '/');
     url.searchParams.set('mode', 'signin');
     url.searchParams.set('confirmed', '1');
     return url.toString();
