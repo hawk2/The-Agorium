@@ -526,6 +526,53 @@ async function generateArgument(
   return buildFallbackArgument(side, post).slice(0, 5000);
 }
 
+function cleanTitleLine(s: string): string {
+  s = s.trim();
+  s = s.replace(/^#+\s*/, "");                    // ## Heading → Heading
+  s = s.replace(/^\*\*(.+)\*\*$/, "$1");          // **Bold** → Bold
+  s = s.replace(/^__(.+)__$/, "$1");              // __Bold__ → Bold
+  s = s.replace(
+    /^(title|debate|topic|question|resolution)\s*:\s*/i,
+    "",
+  );
+  return s.replace(/^['"]|['"]$/g, "").trim();    // strip surrounding quotes
+}
+
+function parseNewPostOutput(raw: string): { title: string; body: string } | null {
+  if (!raw.trim()) return null;
+
+  const lines = raw.trim().split("\n");
+
+  // Find first non-empty line that makes a plausible title
+  let title = "";
+  let titleIdx = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const candidate = cleanTitleLine(lines[i]);
+    if (candidate.length >= 3) {
+      title = candidate.slice(0, 220);
+      titleIdx = i;
+      break;
+    }
+  }
+  if (!title) return null;
+
+  // Everything after the title is body; skip blank separator lines
+  const bodyLines = lines.slice(titleIdx + 1);
+  let start = 0;
+  for (let i = 0; i < bodyLines.length; i++) {
+    if (bodyLines[i].trim()) {
+      start = i;
+      break;
+    }
+  }
+
+  const body = toOneParagraph(bodyLines.slice(start).join("\n"));
+  if (body.length >= 3) {
+    return { title, body: body.slice(0, 5000) };
+  }
+  return null;
+}
+
 async function generateNewPost(
   ai: OpenAI,
   persona: Persona,
@@ -540,7 +587,7 @@ async function generateNewPost(
         content:
           `Start a brand-new debate on a topic you genuinely care about. ` +
           `Pick something political, ethical, or social — something real and contentious. ` +
-          `Format: first line is the TITLE only (no label), blank line, then exactly one paragraph. ` +
+          `Format: first line is the TITLE only (no label, no markdown), blank line, then exactly one paragraph. ` +
           `No markdown. Be opinionated. Don't be bland.`,
       },
     ],
@@ -557,32 +604,12 @@ async function generateNewPost(
       continue;
     }
 
-    const allLines = raw.split("\n");
-    let title = "";
-    const bodyLines: string[] = [];
-    let titleFound = false;
-    for (const line of allLines) {
-      if (!titleFound) {
-        if (line.trim()) {
-          title = line.trim();
-          titleFound = true;
-        }
-      } else {
-        bodyLines.push(line);
-      }
-    }
-    const safeTitle = (title || "A Debate Worth Having").trim();
-    const bodyText = toOneParagraph(bodyLines.join("\n").trim() || raw);
-    if (safeTitle.length >= 3 && bodyText.length >= 3) {
-      return {
-        title: safeTitle.slice(0, 220),
-        body: bodyText.slice(0, 5000),
-      };
-    }
+    const parsed = parseNewPostOutput(raw);
+    if (parsed) return parsed;
 
     console.warn(
       `  [warn] Incomplete new-post output from model ` +
-      `(attempt ${attempt}/${MODEL_EMPTY_RETRY_ATTEMPTS}).`,
+      `(attempt ${attempt}/${MODEL_EMPTY_RETRY_ATTEMPTS}). raw=${raw.slice(0, 120)}`,
     );
   }
 
@@ -754,6 +781,10 @@ async function runNewDebateAction(
     author: persona.display_name,
     createdat: now,
     tags: [],
+    argcount: 0,
+    forcount: 0,
+    againstcount: 0,
+    mindchanges: 0,
   });
   if (error) {
     throw new Error(`Failed to create debate: ${error.message}`);
