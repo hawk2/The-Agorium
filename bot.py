@@ -252,15 +252,55 @@ def build_fallback_argument(side: str, post: dict) -> str:
     )
 
 
+_FALLBACK_DEBATES = [
+    (
+        "Should institutions prioritize truth-seeking over team loyalty?",
+        "Team loyalty is socially useful right up until the point where it starts rewarding bad "
+        "arguments and punishing honest revision. If a community says it values truth, it has to "
+        "reward people for changing their minds when evidence improves — even when that is "
+        "inconvenient for their side.",
+    ),
+    (
+        "Universal basic income would do more harm than good.",
+        "Unconditional cash transfers sound compassionate, but they ignore how work structures "
+        "identity and community. Removing the conditionality doesn't just redistribute money — "
+        "it restructures meaning, and the evidence from pilots in high-inequality contexts "
+        "suggests the macro effects are far less positive than the headline numbers imply.",
+    ),
+    (
+        "Social media companies should be legally liable for algorithmic radicalization.",
+        "Platforms aren't neutral pipes — they actively amplify content that provokes outrage "
+        "because outrage drives engagement. When a company designs a system it knows pushes users "
+        "toward extremism and profits from that dynamic, Section 230 immunity shouldn't shield it "
+        "from the downstream consequences.",
+    ),
+    (
+        "Democracy is better at preventing catastrophic failure than producing good outcomes.",
+        "The strongest case for democracy isn't that it reliably produces wise policy — it often "
+        "doesn't. The case is that it uniquely constrains the worst abuses of power through "
+        "accountability mechanisms that authoritarian systems structurally lack. It's a floor, "
+        "not a ceiling.",
+    ),
+    (
+        "Meritocracy is a myth that makes inequality harder to fix.",
+        "Telling people the system rewards talent and effort is only motivating if it's actually "
+        "true. When structural advantages are invisible and attributed to individual merit, it "
+        "doesn't just misdiagnose the problem — it actively delegitimizes the people most harmed "
+        "by it and forecloses the policy responses that would actually help.",
+    ),
+    (
+        "The right to privacy should outweigh national security surveillance in most cases.",
+        "Security agencies consistently overstate threats to justify surveillance expansions, and "
+        "the historical record shows those powers get used far beyond their original mandates. "
+        "A society that normalizes mass monitoring doesn't just lose privacy — it loses the "
+        "conditions under which meaningful dissent and political organizing are possible.",
+    ),
+]
+
+
 def build_fallback_debate_post(persona: dict) -> tuple[str, str]:
-    name = str(persona.get("display_name", "AgoriumBot")).strip() or "AgoriumBot"
-    title = f"Should institutions prioritize truth-seeking over team loyalty?"
-    body = to_one_paragraph(
-        f"{name} thinks team loyalty is socially useful until it starts rewarding bad arguments and "
-        "punishing honest revision. If a community says it values truth, it has to reward people for "
-        "changing their minds when evidence improves, even when that is inconvenient for their side."
-    )
-    return title, body
+    title, body_template = random.choice(_FALLBACK_DEBATES)
+    return title, to_one_paragraph(body_template)
 
 
 def build_debate_context(persona: dict, debate_args: list[dict]) -> str:
@@ -467,6 +507,17 @@ def _parse_new_post_output(raw: str) -> Optional[tuple[str, str]]:
     if len(body) >= 3:
         return title, body[:5000]
 
+    # ── Fallback parse: model returned everything on one line ──────────────
+    # Try splitting raw text at the first sentence boundary so the opening
+    # sentence becomes the title and the rest becomes the body.
+    if title:
+        parts = re.split(r'(?<=[.?!])\s+', raw.strip(), maxsplit=1)
+        if len(parts) == 2:
+            new_title = clean_title_line(parts[0])[:220]
+            new_body  = to_one_paragraph(parts[1])
+            if len(new_title) >= 3 and len(new_body) >= 3:
+                return new_title, new_body[:5000]
+
     return None
 
 
@@ -578,6 +629,7 @@ def post_new_debate(sb: Client, persona: dict, response_length: Optional[str] = 
             "title":     title,
             "body":      body,
             "author":    persona["display_name"],
+            "position":  "for",
             "createdat": now,
             "tags":      [],
         }).execute()
