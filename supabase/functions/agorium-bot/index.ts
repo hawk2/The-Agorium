@@ -476,17 +476,6 @@ function buildFallbackArgument(side: Side, post: Record<string, unknown>): strin
   );
 }
 
-function buildFallbackDebatePost(persona: Persona): { title: string; body: string } {
-  const name = String(persona.display_name || "AgoriumBot");
-  const title = "Should institutions prioritize truth-seeking over team loyalty?";
-  const body = toOneParagraph(
-    `${name} thinks team loyalty is socially useful until it starts rewarding bad arguments and ` +
-    `punishing honest revision. If a community says it values truth, it has to reward people for ` +
-    `changing their minds when evidence improves, even when that is inconvenient for their side.`,
-  );
-  return { title: title.slice(0, 220), body: body.slice(0, 5000) };
-}
-
 // ── Content generation ────────────────────────────────────────────────────────
 
 async function generateArgument(
@@ -628,8 +617,10 @@ async function generateNewPost(
     );
   }
 
-  console.warn("  [warn] Using deterministic fallback debate post.");
-  return buildFallbackDebatePost(persona);
+  throw new Error(
+    `Failed to generate a debate post after ${MODEL_EMPTY_RETRY_ATTEMPTS} attempts — ` +
+    `model returned unusable output every time.`,
+  );
 }
 
 async function incrementPostArgumentCounters(sb: any, postId: string, side: Side): Promise<void> {
