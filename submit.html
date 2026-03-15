@@ -49,7 +49,7 @@
     .form-wrapper { max-width: 720px; margin: 0 auto; padding: 52px 48px 100px; }
 
     /* POST TYPE SELECTOR */
-    .type-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 36px; }
+    .type-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 36px; }
     .type-card {
       padding: 20px 18px;
       background: white;
@@ -63,12 +63,10 @@
     .type-card.selected { border-color: var(--navy); background: rgba(46,80,119,0.04); }
     .type-card.selected.debate { border-color: var(--red); background: rgba(164,22,35,0.04); }
     .type-card.selected.discussion { border-color: var(--blue); background: rgba(113,169,247,0.07); }
-    .type-card.selected.question { border-color: var(--green); background: rgba(53,143,101,0.05); }
     .type-icon { font-size: 22px; margin-bottom: 8px; display: block; }
     .type-name { font-family: 'Cinzel', serif; font-size: 13px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--navy); margin-bottom: 4px; }
     .type-card.selected.debate .type-name { color: var(--red); }
     .type-card.selected.discussion .type-name { color: var(--blue); }
-    .type-card.selected.question .type-name { color: var(--green); }
     .type-desc { font-size: 13px; color: #888; line-height: 1.4; }
 
     /* FIELDS */
@@ -187,7 +185,6 @@
     .btn-post.debate-type { background: var(--red); }
     .btn-post.debate-type:hover { background: #8a1020; }
     .btn-post.discussion-type { background: var(--blue); }
-    .btn-post.question-type { background: var(--green); }
 
     /* ERRORS */
     .field-error { font-size: 13px; color: var(--red); font-family: 'Cinzel', serif; letter-spacing: 0.05em; margin-top: 6px; display: none; }
@@ -210,7 +207,7 @@
       .nav-links { display: none; }
       .page-header { padding: 40px 24px 36px; }
       .form-wrapper { padding: 36px 24px 60px; }
-      .type-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .type-grid { grid-template-columns: 1fr; gap: 10px; }
     }
   </style>
 </head>
@@ -238,7 +235,7 @@
     <div class="page-header-inner">
       <div class="breadcrumb"><a href="debates.html">Debates</a> › New Post</div>
       <h1 class="page-title">New Post</h1>
-      <p class="page-desc">Start a debate, open a discussion, or pose a question.</p>
+      <p class="page-desc">Start a debate or open a discussion — questions welcome.</p>
     </div>
   </div>
 
@@ -257,12 +254,7 @@
           <div class="type-card discussion" onclick="selectType('discussion', this)">
             <span class="type-icon">💬</span>
             <div class="type-name">Discussion</div>
-            <div class="type-desc">An open topic with no fixed sides. All views welcome.</div>
-          </div>
-          <div class="type-card question" onclick="selectType('question', this)">
-            <span class="type-icon">❓</span>
-            <div class="type-name">Question</div>
-            <div class="type-desc">Seeking genuine answers or perspectives on something.</div>
+            <div class="type-desc">An open topic or question with no fixed sides. All perspectives welcome.</div>
           </div>
 
         </div>
@@ -409,28 +401,16 @@
         successSub: 'The floor is open. Let the arguments begin.'
       },
       discussion: {
-        titleLabel: 'Topic',
-        titleHint: 'A clear topic for open-ended discussion.',
+        titleLabel: 'Topic / Question',
+        titleHint: 'A clear topic or question for open-ended discussion.',
         bodyLabel: 'Opening Thoughts',
-        bodyHint: 'Frame the discussion. What angles are worth exploring?',
+        bodyHint: 'Frame the discussion — or explain why you\'re asking and what you\'ve already considered.',
         placeholder: 'e.g. The role of social media in shaping political identity',
         btnClass: 'discussion-type',
-        btnText: 'Start Discussion ✦',
+        btnText: 'Post ✦',
         successIcon: '💬',
-        successTitle: 'Discussion started.',
-        successSub: 'Your discussion is live on The Agorium.'
-      },
-      question: {
-        titleLabel: 'Question',
-        titleHint: 'Ask clearly and specifically. Vague questions get vague answers.',
-        bodyLabel: 'Context',
-        bodyHint: 'Why are you asking? What have you already considered?',
-        placeholder: 'e.g. What distinguishes civil disobedience from mere lawbreaking?',
-        btnClass: 'question-type',
-        btnText: 'Post Question ✦',
-        successIcon: '❓',
-        successTitle: 'Question posted.',
-        successSub: 'The Agorium will weigh in.'
+        successTitle: 'Posted.',
+        successSub: 'Your post is live on The Agorium.'
       }
     };
 

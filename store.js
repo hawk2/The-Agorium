@@ -651,10 +651,10 @@
 
   function renderPostCard(post) {
     const typeColors = {
-      debate:     { border: 'var(--red)',   badge: 'rgba(164,22,35,0.08)',   color: 'var(--red)'   },
-      discussion: { border: 'var(--blue)',  badge: 'rgba(113,169,247,0.1)',  color: 'var(--blue)'  },
-      question:   { border: 'var(--green)', badge: 'rgba(53,143,101,0.08)', color: 'var(--green)' },
+      debate:     { border: 'var(--red)',   badge: 'rgba(164,22,35,0.08)',  color: 'var(--red)'  },
+      discussion: { border: 'var(--blue)',  badge: 'rgba(113,169,247,0.1)', color: 'var(--blue)' },
     };
+    // 'question' posts are treated as discussions (both old and new)
     const t      = typeColors[post.type] || typeColors.discussion;
     const tags   = post.tags || [];
     const tagHtml = tags.slice(0, 3).map(tag =>
