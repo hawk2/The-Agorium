@@ -573,6 +573,21 @@ function parseNewPostOutput(raw: string): { title: string; body: string } | null
   if (body.length >= 3) {
     return { title, body: body.slice(0, 5000) };
   }
+
+  // Fallback parse: model returned everything on one line (no newline between title and body).
+  // Split at the first sentence boundary so the opening sentence becomes the title
+  // and the rest becomes the body.
+  if (title) {
+    const parts = raw.trim().split(/(?<=[.?!])\s+/, 2);
+    if (parts.length === 2) {
+      const newTitle = cleanTitleLine(parts[0]).slice(0, 220);
+      const newBody  = toOneParagraph(parts[1]);
+      if (newTitle.length >= 3 && newBody.length >= 3) {
+        return { title: newTitle, body: newBody.slice(0, 5000) };
+      }
+    }
+  }
+
   return null;
 }
 
@@ -581,11 +596,14 @@ async function generateNewPost(
   persona: Persona,
   responseLength?: string | null,
 ): Promise<{ title: string; body: string }> {
+  const systemPrompt = isAthenaEquivalent(persona)
+    ? `${persona.prompt_style}\n\nHard constraints:\n- Never cite Scripture, Bible verses, God, Jesus, church, or Christian doctrine.\n- Never invoke the Founders, natural law, or religious authority.\n- Stay analytical and strategic.`
+    : persona.prompt_style;
   const request = {
     model: MODEL,
     max_completion_tokens: NEW_POST_MAX_COMPLETION_TOKENS,
     messages: [
-      { role: "system" as const, content: persona.prompt_style },
+      { role: "system" as const, content: systemPrompt },
       {
         role: "user" as const,
         content:

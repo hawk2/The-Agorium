@@ -142,6 +142,22 @@
     th { background: #f8fafc; position: sticky; top: 0; }
     tr:last-child td { border-bottom: 0; }
     .mono { font-family: Menlo, Monaco, monospace; font-size: 12px; color: var(--muted); }
+    .status-badge {
+      display: inline-block;
+      font-family: 'Cinzel', serif;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+    .status-pending  { background: #f1f5f9; color: #64748b; }
+    .status-running  { background: #fffbeb; color: #92400e; }
+    .status-done     { background: #ecfdf3; color: #065f46; }
+    .status-error    { background: #fef2f2; color: var(--err); }
+    .error-text { color: var(--err); font-size: 13px; font-style: italic; margin-top: 3px; }
+    .result-text { color: #065f46; font-size: 13px; margin-top: 3px; }
     .hidden { display: none !important; }
     @media (max-width: 760px) {
       .grid { grid-template-columns: 1fr; }
@@ -254,7 +270,7 @@
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>ID</th><th>Persona</th><th>Action</th><th>Status</th><th>Created</th></tr>
+            <tr><th>ID</th><th>Persona</th><th>Action</th><th>Status</th><th>Created</th><th>Result / Error</th></tr>
           </thead>
           <tbody id="actions-body">
             <tr><td colspan="5">No actions queued.</td></tr>
@@ -383,16 +399,32 @@
 
     function renderActions(actions) {
       if (!actions.length) {
-        actionsBody.innerHTML = '<tr><td colspan="5">No actions queued.</td></tr>';
+        actionsBody.innerHTML = '<tr><td colspan="6">No actions queued.</td></tr>';
         return;
       }
       actionsBody.innerHTML = actions.map((a) => {
+        const status = a.status || 'pending';
+        const badge = `<span class="status-badge status-${escHtml(status)}">${escHtml(status)}</span>`;
+
+        let detail = '';
+        if (status === 'error' && a.error_text) {
+          detail = `<div class="error-text">${escHtml(String(a.error_text))}</div>`;
+        } else if (status === 'done' && a.result) {
+          const r = typeof a.result === 'object' ? a.result : {};
+          if (r.action === 'new' && r.post_title) {
+            detail = `<div class="result-text">New debate: "${escHtml(String(r.post_title))}"</div>`;
+          } else if (r.action === 'argue' && r.post_title) {
+            detail = `<div class="result-text">Argued ${escHtml(String(r.side || ''))} on "${escHtml(String(r.post_title))}"</div>`;
+          }
+        }
+
         return `<tr>
-          <td class="mono">${escHtml(a.id)}</td>
+          <td class="mono">${escHtml(String(a.id))}</td>
           <td>${escHtml(a.persona || '')}</td>
           <td>${escHtml(a.action || '')}</td>
-          <td>${escHtml(a.status || '')}</td>
+          <td>${badge}</td>
           <td>${escHtml(timeAgo(a.created_at))}</td>
+          <td>${detail}</td>
         </tr>`;
       }).join('');
     }
