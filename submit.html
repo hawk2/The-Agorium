@@ -70,9 +70,9 @@
     .type-desc { font-size: 13px; color: #888; line-height: 1.4; }
 
     /* FIELDS */
-    .field-group { margin-bottom: 28px; }
-    .field-label { font-family: 'Cinzel', serif; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--navy); display: block; margin-bottom: 8px; }
-    .field-hint { font-size: 14px; color: #999; margin-bottom: 10px; font-style: italic; line-height: 1.5; }
+    .field-group { margin-bottom: 24px; }
+    .field-label { font-family: 'Cinzel', serif; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--navy); display: block; margin-bottom: 6px; }
+    .field-hint { font-size: 13px; color: #aaa; margin-bottom: 8px; font-style: italic; line-height: 1.45; }
     .field-required { color: var(--red); margin-left: 2px; }
 
     input[type="text"], textarea {
@@ -165,6 +165,27 @@
     .debate-fields { display: none; }
     .debate-fields.show { display: block; }
 
+    /* DEBATE POSITION PANEL */
+    .debate-panel {
+      background: rgba(164,22,35,0.025);
+      border: 1px solid rgba(164,22,35,0.15);
+      border-left: 3px solid rgba(164,22,35,0.5);
+      border-radius: 3px;
+      padding: 20px 22px 2px;
+      margin-bottom: 24px;
+      animation: panelIn 0.25s ease both;
+    }
+    @keyframes panelIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+    .debate-panel-title {
+      font-family: 'Cinzel', serif;
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: rgba(164,22,35,0.6);
+      margin-bottom: 16px;
+    }
+    .debate-panel .field-group { margin-bottom: 20px; }
+
     .optional-badge { font-family: 'Cinzel', serif; font-size: 10px; letter-spacing: 0.1em; color: #bbb; margin-left: 6px; }
 
     /* CONFIDENCE */
@@ -174,10 +195,10 @@
     .conf-value { font-family: 'Cinzel', serif; font-size: 22px; font-weight: 700; color: var(--navy); min-width: 52px; text-align: right; }
 
     /* DIVIDER */
-    .section-divider { border: none; border-top: 1px solid rgba(46,80,119,0.1); margin: 36px 0; }
+    .section-divider { border: none; border-top: 1px solid rgba(46,80,119,0.1); margin: 26px 0; }
 
     /* SUBMIT */
-    .form-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 40px; padding-top: 28px; border-top: 1px solid rgba(46,80,119,0.1); }
+    .form-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; padding-top: 24px; border-top: 1px solid rgba(46,80,119,0.1); }
     .btn-cancel { font-family: 'Cinzel', serif; font-size: 13px; letter-spacing: 0.08em; padding: 10px 24px; background: transparent; color: #aaa; border: 1px solid #ddd; border-radius: 2px; cursor: pointer; transition: all 0.2s; text-decoration: none; display: inline-block; }
     .btn-cancel:hover { color: var(--navy); border-color: var(--navy); }
     .btn-post { font-family: 'Cinzel', serif; font-size: 14px; letter-spacing: 0.1em; padding: 13px 36px; background: var(--navy); color: white; border: none; border-radius: 2px; cursor: pointer; transition: all 0.2s; }
@@ -275,30 +296,33 @@
       <div class="field-group">
         <label class="field-label" id="body-label">Body <span class="field-required">*</span></label>
         <p class="field-hint" id="body-hint">Provide context, background, or your reasoning.</p>
-        <textarea id="post-body" rows="5" placeholder="Write here..."></textarea>
+        <textarea id="post-body" rows="4" placeholder="Write here..."></textarea>
         <div class="field-error" id="err-body">Please write a body for your post.</div>
       </div>
 
       <!-- DEBATE-ONLY FIELDS -->
       <div class="debate-fields" id="debate-fields">
         <div id="confidence-block" style="display:none;">
-          <div class="field-group">
-            <label class="field-label">Confidence Level <span class="field-required">*</span></label>
-            <p class="field-hint">How certain are you? 0 = barely leaning, 100 = fully convinced.</p>
-            <div class="conf-row">
-              <input type="range" class="conf-slider" min="0" max="100" value="60" id="conf-slider" oninput="updateConf(this)">
-              <div class="conf-value" id="conf-val">60%</div>
+          <div class="debate-panel">
+            <div class="debate-panel-title">Your Position</div>
+
+            <div class="field-group">
+              <label class="field-label">Confidence Level <span class="field-required">*</span></label>
+              <p class="field-hint">0 = barely leaning, 100 = fully convinced.</p>
+              <div class="conf-row">
+                <input type="range" class="conf-slider" min="0" max="100" value="60" id="conf-slider" oninput="updateConf(this)">
+                <div class="conf-value" id="conf-val">60%</div>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label">What Would Change Your Mind? <span class="field-required">*</span></label>
+              <p class="field-hint">Positions without conditions are not arguments.</p>
+              <textarea id="post-change" rows="3" placeholder="e.g. Evidence showing that X leads to Y in peer-reviewed studies over 10+ years..."></textarea>
+              <div class="field-error" id="err-change">Please state what would change your mind.</div>
             </div>
           </div>
-
-          <div class="field-group">
-            <label class="field-label">What Would Change Your Mind? <span class="field-required">*</span></label>
-            <p class="field-hint">Required if you've taken a position. Positions without conditions are not arguments.</p>
-            <textarea id="post-change" rows="3" placeholder="e.g. Evidence showing that X leads to Y in peer-reviewed studies over 10+ years..."></textarea>
-            <div class="field-error" id="err-change">Please state what would change your mind.</div>
-          </div>
         </div>
-
       </div>
 
       <!-- TAGS -->
