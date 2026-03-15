@@ -281,8 +281,6 @@
 
       <!-- DEBATE-ONLY FIELDS -->
       <div class="debate-fields" id="debate-fields">
-        <div id="for-auto-note" style="display:none; background:rgba(53,143,101,0.08); border:1px solid rgba(53,143,101,0.25); border-radius:3px; padding:10px 14px; font-family:'Cinzel',serif; font-size:11px; letter-spacing:0.1em; color:var(--green); margin-bottom:28px;">✦ You are automatically For your thesis. Others may argue either side.</div>
-
         <div id="confidence-block" style="display:none;">
           <div class="field-group">
             <label class="field-label">Confidence Level <span class="field-required">*</span></label>
@@ -421,12 +419,9 @@
       const debateFields = document.getElementById('debate-fields');
       if (type === 'debate') {
         debateFields.classList.add('show');
-        // You are always For your own thesis
         document.getElementById('confidence-block').style.display = 'block';
-        document.getElementById('for-auto-note').style.display = 'block';
       } else {
         debateFields.classList.remove('show');
-        document.getElementById('for-auto-note').style.display = 'none';
       }
 
       // Update submit button
