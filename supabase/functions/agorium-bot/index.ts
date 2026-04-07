@@ -138,33 +138,38 @@ function deterministicSideFromKey(key: string): Side {
   return checksum % 2 === 0 ? "for" : "against";
 }
 
-function extractChatMessageText(message: unknown): string {
-  if (!message || typeof message !== "object") return "";
-  const msg = message as Record<string, unknown>;
-  const content = msg.content;
+function extractResponseText(response: unknown): string {
+  if (!response || typeof response !== "object") return "";
+  const r = response as Record<string, unknown>;
 
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    const parts: string[] = [];
-    for (const part of content) {
-      if (typeof part === "string") {
-        if (part.trim()) parts.push(part);
-        continue;
-      }
-      if (!part || typeof part !== "object") continue;
-      const item = part as Record<string, unknown>;
-      const text =
-        typeof item.text === "string" ? item.text
-          : typeof item.content === "string" ? item.content
-            : typeof item.value === "string" ? item.value
-              : "";
-      if (text.trim()) parts.push(text);
-    }
-    if (parts.length) return parts.join("\n");
+  // Primary: output_text convenience property
+  if (typeof r.output_text === "string" && r.output_text.trim()) {
+    return r.output_text;
   }
 
-  const refusal = msg.refusal;
-  if (typeof refusal === "string") return refusal;
+  // Fallback: walk the output list manually
+  const output = r.output;
+  if (Array.isArray(output)) {
+    for (const item of output) {
+      if (!item || typeof item !== "object") continue;
+      const it = item as Record<string, unknown>;
+      const content = it.content;
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (!part || typeof part !== "object") continue;
+          const pt = part as Record<string, unknown>;
+          if (typeof pt.text === "string" && pt.text.trim()) return pt.text;
+        }
+      }
+      if (typeof it.text === "string" && it.text.trim()) return it.text;
+      if (typeof it.refusal === "string" && it.refusal.trim()) return it.refusal;
+    }
+  }
+
+  console.warn(
+    `  [debug] extractResponseText got no text. ` +
+    `output_len=${Array.isArray(output) ? output.length : "n/a"}`,
+  );
   return "";
 }
 
@@ -340,23 +345,18 @@ async function classifyInitialSide(
   const votes: Side[] = [];
   for (const systemPrompt of promptVariants) {
     for (let i = 0; i < SIDE_CLASSIFY_MAX_ATTEMPTS; i++) {
-      const msg = await ai.chat.completions.create({
+      const resp = await ai.responses.create({
         model: MODEL,
-        max_completion_tokens: DECISION_MAX_COMPLETION_TOKENS,
-        messages: [
-          systemPrompt,
-          {
-            role: "user",
-            content:
-              `Debate title: ${title}\n\nDebate body: ${body}\n\n` +
-              summaryBlock +
-              `All arguments in this debate so far:\n${context}\n\n` +
-              `Which side should ${persona.display_name} take in character? ` +
-              `Return exactly one token: for or against.`,
-          },
-        ],
+        max_output_tokens: DECISION_MAX_COMPLETION_TOKENS,
+        instructions: systemPrompt.content,
+        input:
+          `Debate title: ${title}\n\nDebate body: ${body}\n\n` +
+          summaryBlock +
+          `All arguments in this debate so far:\n${context}\n\n` +
+          `Which side should ${persona.display_name} take in character? ` +
+          `Return exactly one token: for or against.`,
       });
-      const parsed = parseSideChoice(extractChatMessageText(msg.choices[0].message));
+      const parsed = parseSideChoice(extractResponseText(resp));
       if (parsed) votes.push(parsed);
     }
   }
@@ -392,34 +392,26 @@ async function shouldSwitchSide(
 
   const decisions: Array<"switch" | "stay"> = [];
   for (let i = 0; i < SWITCH_DECISION_MAX_ATTEMPTS; i++) {
-    const msg = await ai.chat.completions.create({
+    const resp = await ai.responses.create({
       model: MODEL,
-      max_completion_tokens: DECISION_MAX_COMPLETION_TOKENS,
-      messages: [
-        {
-          role: "system",
-          content:
-            `${persona.prompt_style}\n\n` +
-            `Decide if you should switch sides based on argument strength only. ` +
-            `Return one token only: switch or stay.`,
-        },
-        {
-          role: "user",
-          content:
-            `Debate title: ${title}\n\nDebate body: ${body}\n\n` +
-            `Current side: ${currentSide}\n\n` +
-            summaryBlock +
-            `Full chronological thread:\n${fullContext}\n\n` +
-            `Your last argument:\n${ownBody}\n\n` +
-            `New opposing arguments:\n${opposingBlob}\n\n` +
-            `Entries marked OWN were written by you. Consider the entire thread, ` +
-            `including rebuttals and follow-ups, not just the latest replies.\n\n` +
-            `If the opposing case is genuinely stronger and you are convinced, return switch. ` +
-            `Otherwise return stay. Return exactly one token: switch or stay.`,
-        },
-      ],
+      max_output_tokens: DECISION_MAX_COMPLETION_TOKENS,
+      instructions:
+        `${persona.prompt_style}\n\n` +
+        `Decide if you should switch sides based on argument strength only. ` +
+        `Return one token only: switch or stay.`,
+      input:
+        `Debate title: ${title}\n\nDebate body: ${body}\n\n` +
+        `Current side: ${currentSide}\n\n` +
+        summaryBlock +
+        `Full chronological thread:\n${fullContext}\n\n` +
+        `Your last argument:\n${ownBody}\n\n` +
+        `New opposing arguments:\n${opposingBlob}\n\n` +
+        `Entries marked OWN were written by you. Consider the entire thread, ` +
+        `including rebuttals and follow-ups, not just the latest replies.\n\n` +
+        `If the opposing case is genuinely stronger and you are convinced, return switch. ` +
+        `Otherwise return stay. Return exactly one token: switch or stay.`,
     });
-    const decision = parseSwitchDecision(extractChatMessageText(msg.choices[0].message));
+    const decision = parseSwitchDecision(extractResponseText(resp));
     if (decision) decisions.push(decision);
   }
   if (decisions.length && decisions.every((d) => d === "switch")) return true;
@@ -495,32 +487,25 @@ async function generateThreadSummary(
   const title = String(post.title ?? "").trim();
   const body = String(post.body ?? "").trim();
   const context = buildDebateContext(debateArgs);
-  const request = {
-    model: MODEL,
-    max_completion_tokens: THREAD_SUMMARY_MAX_COMPLETION_TOKENS,
-    messages: [
-      {
-        role: "system" as const,
-        content:
-          "You write neutral moderator summaries for debate threads. " +
-          "Summarize the whole thread so far in 2 to 5 sentences. " +
-          "Mention the main arguments from each side, the strongest rebuttals, and any meaningful turns in the exchange. " +
-          "Do not take sides. Do not add new claims. No markdown. One paragraph only.",
-      },
-      {
-        role: "user" as const,
-        content:
-          `Debate title: ${title}\n\n` +
-          `Debate body: ${body}\n\n` +
-          `Summarize the first ${targetArgCount} chronological arguments in this thread.\n\n` +
-          `Thread:\n${context}`,
-      },
-    ],
-  };
+  const instructions =
+    "You write neutral moderator summaries for debate threads. " +
+    "Summarize the whole thread so far in 2 to 5 sentences. " +
+    "Mention the main arguments from each side, the strongest rebuttals, and any meaningful turns in the exchange. " +
+    "Do not take sides. Do not add new claims. No markdown. One paragraph only.";
+  const input =
+    `Debate title: ${title}\n\n` +
+    `Debate body: ${body}\n\n` +
+    `Summarize the first ${targetArgCount} chronological arguments in this thread.\n\n` +
+    `Thread:\n${context}`;
 
   for (let attempt = 1; attempt <= MODEL_EMPTY_RETRY_ATTEMPTS; attempt++) {
-    const msg = await ai.chat.completions.create(request);
-    const raw = extractChatMessageText(msg.choices[0].message);
+    const resp = await ai.responses.create({
+      model: MODEL,
+      max_output_tokens: THREAD_SUMMARY_MAX_COMPLETION_TOKENS,
+      instructions,
+      input,
+    });
+    const raw = extractResponseText(resp);
     const paragraph = toOneParagraph(raw).slice(0, THREAD_SUMMARY_MAX_CHARS);
     if (paragraph.length >= 3) return paragraph;
     console.warn(
@@ -631,33 +616,29 @@ async function generateArgument(
   const summaryBlock = buildThreadSummaryPromptBlock(post);
   const context = buildDebateContext(debateArgs, persona.display_name);
   const hintLine = hint ? `\n\nGuidance from the organizer: ${hint}` : "";
-  const request = {
-    model: MODEL,
-    max_completion_tokens: ARGUMENT_MAX_COMPLETION_TOKENS,
-    messages: [
-      { role: "system" as const, content: persona.prompt_style },
-      {
-        role: "user" as const,
-        content:
-          `You're arguing in this debate:\nTitle: ${title}\n\n${body}\n\n` +
-          `Resolved side: ${side.toUpperCase()} (source: ${sideSource}).\n\n` +
-          summaryBlock +
-          `All arguments currently in this debate are below in chronological order. ` +
-          `Entries marked OWN were written by you. ` +
-          `You must account for the whole thread and all prior rebuttals.\n\n` +
-          `${context}\n\n` +
-          `You must argue the ${side.toUpperCase()} side. Do not switch sides.\n\n` +
-          `Write your argument in exactly one paragraph (${resolveResponseLengthDesc(responseLength)}). No markdown. No headers. ` +
-          `Target at least one OTHER argument by author and claim, explain why it fails, and advance a stronger counter-claim. ` +
-          `Argue hard. Make a real point. Be true to your character.` +
-          hintLine,
-      },
-    ],
-  };
+  const argInstructions = persona.prompt_style;
+  const argInput =
+    `You're arguing in this debate:\nTitle: ${title}\n\n${body}\n\n` +
+    `Resolved side: ${side.toUpperCase()} (source: ${sideSource}).\n\n` +
+    summaryBlock +
+    `All arguments currently in this debate are below in chronological order. ` +
+    `Entries marked OWN were written by you. ` +
+    `You must account for the whole thread and all prior rebuttals.\n\n` +
+    `${context}\n\n` +
+    `You must argue the ${side.toUpperCase()} side. Do not switch sides.\n\n` +
+    `Write your argument in exactly one paragraph (${resolveResponseLengthDesc(responseLength)}). No markdown. No headers. ` +
+    `Target at least one OTHER argument by author and claim, explain why it fails, and advance a stronger counter-claim. ` +
+    `Argue hard. Make a real point. Be true to your character.` +
+    hintLine;
 
   for (let attempt = 1; attempt <= MODEL_EMPTY_RETRY_ATTEMPTS; attempt++) {
-    const msg = await ai.chat.completions.create(request);
-    const raw = extractChatMessageText(msg.choices[0].message);
+    const resp = await ai.responses.create({
+      model: MODEL,
+      max_output_tokens: ARGUMENT_MAX_COMPLETION_TOKENS,
+      instructions: argInstructions,
+      input: argInput,
+    });
+    const raw = extractResponseText(resp);
     const paragraph = toOneParagraph(raw);
     if (paragraph.length >= 3) {
       return paragraph.slice(0, 5000);
@@ -757,29 +738,25 @@ async function generateNewPost(
   hint?: string | null,
 ): Promise<{ title: string; body: string }> {
   const hintLine = hint ? `\n\nTopic guidance: ${hint}` : "";
-  const request = {
-    model: MODEL,
-    max_completion_tokens: NEW_POST_MAX_COMPLETION_TOKENS,
-    messages: [
-      { role: "system" as const, content: persona.prompt_style },
-      {
-        role: "user" as const,
-        content:
-          `Start a brand-new debate on a topic you genuinely care about. ` +
-          `Pick something political, ethical, or social — something real and contentious. ` +
-          `Respond in EXACTLY this format:\n` +
-          `1. Line 1: the TITLE only (no label, no prefix, no markdown)\n` +
-          `2. Line 2: blank\n` +
-          `3. Lines 3+: exactly one paragraph (${resolveResponseLengthDesc(responseLength)}) making your argument\n` +
-          `No markdown anywhere. Be opinionated. Don't be bland.` +
-          hintLine,
-      },
-    ],
-  };
+  const newPostInstructions = persona.prompt_style;
+  const newPostInput =
+    `Start a brand-new debate on a topic you genuinely care about. ` +
+    `Pick something political, ethical, or social — something real and contentious. ` +
+    `Respond in EXACTLY this format:\n` +
+    `1. Line 1: the TITLE only (no label, no prefix, no markdown)\n` +
+    `2. Line 2: blank\n` +
+    `3. Lines 3+: exactly one paragraph (${resolveResponseLengthDesc(responseLength)}) making your argument\n` +
+    `No markdown anywhere. Be opinionated. Don't be bland.` +
+    hintLine;
 
   for (let attempt = 1; attempt <= MODEL_EMPTY_RETRY_ATTEMPTS; attempt++) {
-    const msg = await ai.chat.completions.create(request);
-    const raw = extractChatMessageText(msg.choices[0].message).trim();
+    const resp = await ai.responses.create({
+      model: MODEL,
+      max_output_tokens: NEW_POST_MAX_COMPLETION_TOKENS,
+      instructions: newPostInstructions,
+      input: newPostInput,
+    });
+    const raw = extractResponseText(resp).trim();
     if (!raw) {
       console.warn(
         `  [warn] Empty new-post body from model ` +
@@ -887,27 +864,19 @@ async function runSearchAction(
     `[${i}] ID: ${p.id}\nTitle: ${p.title}\nBody: ${String(p.body ?? "").slice(0, 250)}`
   ).join("\n\n");
 
-  const msg = await ai.chat.completions.create({
+  const searchResp = await ai.responses.create({
     model: MODEL,
-    max_completion_tokens: 1200,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are a semantic search engine for a debate forum. " +
-          "Given a list of debates and a search query, identify the most relevant debates. " +
-          'Return a JSON array of objects with fields: id (string), relevance (number 1-10), reason (short string, max 15 words). ' +
-          "Only include debates with relevance >= 6. Maximum 10 results. " +
-          "Respond with only the JSON array, no other text.",
-      },
-      {
-        role: "user",
-        content: `Search query: "${trimmedQuery}"\n\nDebates:\n${postList}`,
-      },
-    ],
+    max_output_tokens: 1200,
+    instructions:
+      "You are a semantic search engine for a debate forum. " +
+      "Given a list of debates and a search query, identify the most relevant debates. " +
+      'Return a JSON array of objects with fields: id (string), relevance (number 1-10), reason (short string, max 15 words). ' +
+      "Only include debates with relevance >= 6. Maximum 10 results. " +
+      "Respond with only the JSON array, no other text.",
+    input: `Search query: "${trimmedQuery}"\n\nDebates:\n${postList}`,
   });
 
-  const raw = extractChatMessageText(msg.choices[0].message).trim();
+  const raw = extractResponseText(searchResp).trim();
   let ranked: Array<{ id: string; relevance: number; reason: string }> = [];
   try {
     const match = raw.match(/\[[\s\S]*\]/);
