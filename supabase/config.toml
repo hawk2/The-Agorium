@@ -1,0 +1,2 @@
+[functions.agorium-bot]
+verify_jwt = false
