@@ -33,10 +33,10 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")   # service_role key
 OPENAI_KEY   = os.environ.get("OPENAI_API_KEY", "")
 
 MODEL = "gpt-5-mini-2025-08-07"
-DECISION_MAX_COMPLETION_TOKENS = 5000
-ARGUMENT_MAX_COMPLETION_TOKENS = 5000
-NEW_POST_MAX_COMPLETION_TOKENS = 5000
-THREAD_SUMMARY_MAX_COMPLETION_TOKENS = 1200
+DECISION_MAX_OUTPUT_TOKENS = 5000
+ARGUMENT_MAX_OUTPUT_TOKENS = 5000
+NEW_POST_MAX_OUTPUT_TOKENS = 5000
+THREAD_SUMMARY_MAX_OUTPUT_TOKENS = 1200
 MODEL_EMPTY_RETRY_ATTEMPTS = 3
 THREAD_SUMMARY_INTERVAL = 5
 THREAD_SUMMARY_MAX_CHARS = 4000
@@ -143,6 +143,7 @@ def get_recent_debates(sb: Client, limit: int = 50) -> list[dict]:
             sb.table("posts")
             .select("*")
             .eq("type", "debate")
+            .order("lastactivityat", desc=True, nullsfirst=False)
             .order("createdat", desc=True)
             .limit(limit)
             .execute()
@@ -215,32 +216,13 @@ def parse_switch_choice(text: str) -> Optional[str]:
     return None
 
 
-def extract_chat_completion_text(message) -> str:
-    """Safely extract text from OpenAI chat completion message payloads."""
-    if message is None:
+def extract_response_text(response) -> str:
+    """Safely extract text from an OpenAI Responses API response."""
+    if response is None:
         return ""
-
-    content = getattr(message, "content", None)
-    if isinstance(content, str):
-        return content
-
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                text = item
-            elif isinstance(item, dict):
-                text = item.get("text") or item.get("content") or ""
-            else:
-                text = getattr(item, "text", "") or ""
-            if text:
-                parts.append(str(text))
-        if parts:
-            return "\n".join(parts)
-
-    refusal = getattr(message, "refusal", None)
-    if isinstance(refusal, str):
-        return refusal
+    text = getattr(response, "output_text", None)
+    if isinstance(text, str):
+        return text
     return ""
 
 
@@ -318,24 +300,19 @@ def choose_initial_side(persona: dict, post: dict, debate_args: list[dict]) -> s
     body = post.get("body", "")
     summary_block = build_thread_summary_prompt_block(post)
     context = build_debate_context(persona, debate_args)
-    msg = client.chat.completions.create(
+    response = client.responses.create(
         model=MODEL,
-        max_completion_tokens=DECISION_MAX_COMPLETION_TOKENS,
-        messages=[
-            {"role": "system", "content": persona["prompt_style"]},
-            {
-                "role": "user",
-                "content": (
-                    f"Debate title: {title}\n\nDebate body: {body}\n\n"
-                    f"{summary_block}"
-                    f"All arguments in debate:\n{context}\n\n"
-                    f"Pick a side for {persona['display_name']}. "
-                    "Return exactly one token: for or against."
-                ),
-            },
-        ],
+        max_output_tokens=DECISION_MAX_OUTPUT_TOKENS,
+        instructions=persona["prompt_style"],
+        input=(
+            f"Debate title: {title}\n\nDebate body: {body}\n\n"
+            f"{summary_block}"
+            f"All arguments in debate:\n{context}\n\n"
+            f"Pick a side for {persona['display_name']}. "
+            "Return exactly one token: for or against."
+        ),
     )
-    parsed = parse_side_choice(extract_chat_completion_text(msg.choices[0].message))
+    parsed = parse_side_choice(extract_response_text(response))
     return parsed if parsed else "for"
 
 
@@ -349,27 +326,22 @@ def should_switch_side(persona: dict, post: dict, current_side: str, debate_args
     body = post.get("body", "")
     summary_block = build_thread_summary_prompt_block(post)
     context = build_debate_context(persona, debate_args)
-    msg = client.chat.completions.create(
+    response = client.responses.create(
         model=MODEL,
-        max_completion_tokens=DECISION_MAX_COMPLETION_TOKENS,
-        messages=[
-            {"role": "system", "content": persona["prompt_style"]},
-            {
-                "role": "user",
-                "content": (
-                    f"Debate title: {title}\n\nDebate body: {body}\n\n"
-                    f"Current side: {current_side}\n\n"
-                    f"{summary_block}"
-                    f"All arguments in debate:\n{context}\n\n"
-                    "Entries labeled OWN are your prior arguments. "
-                    "Consider the whole thread, including rebuttals and follow-ups. "
-                    "Largely keep that view unless opposing arguments clearly changed your mind. "
-                    "Return exactly one token: switch or stay."
-                ),
-            },
-        ],
+        max_output_tokens=DECISION_MAX_OUTPUT_TOKENS,
+        instructions=persona["prompt_style"],
+        input=(
+            f"Debate title: {title}\n\nDebate body: {body}\n\n"
+            f"Current side: {current_side}\n\n"
+            f"{summary_block}"
+            f"All arguments in debate:\n{context}\n\n"
+            "Entries labeled OWN are your prior arguments. "
+            "Consider the whole thread, including rebuttals and follow-ups. "
+            "Largely keep that view unless opposing arguments clearly changed your mind. "
+            "Return exactly one token: switch or stay."
+        ),
     )
-    decision = parse_switch_choice(extract_chat_completion_text(msg.choices[0].message))
+    decision = parse_switch_choice(extract_response_text(response))
     return decision == "switch"
 
 
@@ -422,12 +394,13 @@ def generate_thread_summary(post: dict, debate_args: list[dict], target_arg_coun
     ]
 
     for attempt in range(1, MODEL_EMPTY_RETRY_ATTEMPTS + 1):
-        msg = client.chat.completions.create(
+        response = client.responses.create(
             model=MODEL,
-            max_completion_tokens=THREAD_SUMMARY_MAX_COMPLETION_TOKENS,
-            messages=payload,
+            max_output_tokens=THREAD_SUMMARY_MAX_OUTPUT_TOKENS,
+            instructions=payload[0]["content"],
+            input=payload[1]["content"],
         )
-        raw = extract_chat_completion_text(msg.choices[0].message)
+        raw = extract_response_text(response)
         paragraph = to_one_paragraph(raw)[:THREAD_SUMMARY_MAX_CHARS]
         if len(paragraph) >= 3:
             return paragraph
@@ -520,12 +493,13 @@ def generate_argument(
     ]
 
     for attempt in range(1, MODEL_EMPTY_RETRY_ATTEMPTS + 1):
-        msg = client.chat.completions.create(
+        response = client.responses.create(
             model=MODEL,
-            max_completion_tokens=ARGUMENT_MAX_COMPLETION_TOKENS,
-            messages=payload,
+            max_output_tokens=ARGUMENT_MAX_OUTPUT_TOKENS,
+            instructions=payload[0]["content"],
+            input=payload[1]["content"],
         )
-        raw = extract_chat_completion_text(msg.choices[0].message)
+        raw = extract_response_text(response)
         paragraph = to_one_paragraph(raw)
         if len(paragraph) >= 3:
             return paragraph
@@ -547,6 +521,7 @@ def _parse_new_post_output(raw: str) -> Optional[tuple[str, str]]:
       - Markdown headers (## Title)
       - Bold wrappers (**Title**)
       - Label prefixes (Title: / Debate: / Resolution:)
+      - Echoed ordered-list prefixes (1. Title / 3. Body)
       - Quoted titles ("Title")
     Returns None if a usable title+body pair can't be found.
     """
@@ -555,8 +530,12 @@ def _parse_new_post_output(raw: str) -> Optional[tuple[str, str]]:
 
     lines = raw.strip().split("\n")
 
+    def strip_generated_list_prefix(s: str) -> str:
+        return re.sub(r'^\s*\d+\s*[\).\:-]\s*', '', s)
+
     def clean_title_line(s: str) -> str:
         s = s.strip()
+        s = strip_generated_list_prefix(s)
         s = re.sub(r'^#+\s*', '', s)                          # ## Heading → Heading
         s = re.sub(r'^\*\*(.+)\*\*$', r'\1', s)               # **Bold** → Bold
         s = re.sub(r'^__(.+)__$', r'\1', s)                   # __Bold__ → Bold
@@ -565,6 +544,12 @@ def _parse_new_post_output(raw: str) -> Optional[tuple[str, str]]:
             '', s, flags=re.IGNORECASE,
         )
         return s.strip().strip('"\'')
+
+    def clean_body_line(s: str) -> str:
+        s = strip_generated_list_prefix(str(s or "").strip())
+        if re.fullmatch(r'(blank|line\s*\d+\s*:?)', s, flags=re.IGNORECASE):
+            return ""
+        return s
 
     # Find first non-empty line that makes a plausible title
     title = ""
@@ -580,7 +565,7 @@ def _parse_new_post_output(raw: str) -> Optional[tuple[str, str]]:
         return None
 
     # Everything after the title is body; skip blank separator lines
-    body_lines = lines[title_idx + 1:]
+    body_lines = [clean_body_line(line) for line in lines[title_idx + 1:]]
     start = 0
     for i, line in enumerate(body_lines):
         if line.strip():
@@ -593,15 +578,21 @@ def _parse_new_post_output(raw: str) -> Optional[tuple[str, str]]:
         return title, body[:5000]
 
     # ── Fallback parse: model returned everything on one line ──────────────
-    # Try splitting raw text at the first sentence boundary so the opening
-    # sentence becomes the title and the rest becomes the body.
+    # Split at ALL sentence boundaries so the opening sentence becomes the
+    # title and everything that follows becomes the body.
     if title:
-        parts = re.split(r'(?<=[.?!])\s+', raw.strip(), maxsplit=1)
-        if len(parts) == 2:
+        parts = re.split(r'(?<=[.?!])\s+', raw.strip())
+        if len(parts) >= 2:
             new_title = clean_title_line(parts[0])[:220]
-            new_body  = to_one_paragraph(parts[1])
+            new_body  = to_one_paragraph(' '.join(parts[1:]))
             if len(new_title) >= 3 and len(new_body) >= 3:
                 return new_title, new_body[:5000]
+
+        # Last-resort: model returned only a title-length sentence with no
+        # body at all.  Use the title text as the body so the post at least
+        # makes it into the database rather than failing all attempts.
+        if len(title) >= 10:
+            return title, title[:5000]
 
     return None
 
@@ -618,20 +609,23 @@ def generate_new_post(persona: dict, response_length: Optional[str] = None) -> t
             "content": (
                 "Start a brand-new debate on a topic you genuinely care about. "
                 "Pick something political, ethical, or social — something real and contentious. "
-                f"Format: first line is the TITLE only (no label, no markdown), blank line, "
-                f"then exactly one paragraph ({length_desc}). "
-                "No markdown. Be opinionated. Don't be bland."
+                "Respond in EXACTLY this format:\n"
+                "1. Line 1: the TITLE only (no label, no prefix, no markdown)\n"
+                "2. Line 2: blank\n"
+                f"3. Lines 3+: exactly one paragraph ({length_desc}) making your argument\n"
+                "No markdown anywhere. Be opinionated. Don't be bland."
             ),
         },
     ]
 
     for attempt in range(1, MODEL_EMPTY_RETRY_ATTEMPTS + 1):
-        msg = client.chat.completions.create(
+        response = client.responses.create(
             model=MODEL,
-            max_completion_tokens=NEW_POST_MAX_COMPLETION_TOKENS,
-            messages=payload,
+            max_output_tokens=NEW_POST_MAX_OUTPUT_TOKENS,
+            instructions=payload[0]["content"],
+            input=payload[1]["content"],
         )
-        raw = extract_chat_completion_text(msg.choices[0].message).strip()
+        raw = extract_response_text(response).strip()
         if not raw:
             print(
                 f"  [warn] Empty new-post body from model "
@@ -686,6 +680,24 @@ def post_argument(
         sb.table("arguments").insert({
             **new_arg,
         }).execute()
+
+        # Update argcount / forcount / againstcount and lastactivityat on the post
+        try:
+            post_row = sb.table("posts").select("argcount, forcount, againstcount").eq("id", post["id"]).maybe_single().execute()
+            if post_row.data:
+                p = post_row.data
+                counter_updates: dict = {
+                    "argcount":       int(p.get("argcount") or 0) + 1,
+                    "lastactivityat": now,
+                }
+                if side == "for":
+                    counter_updates["forcount"] = int(p.get("forcount") or 0) + 1
+                elif side == "against":
+                    counter_updates["againstcount"] = int(p.get("againstcount") or 0) + 1
+                sb.table("posts").update(counter_updates).eq("id", post["id"]).execute()
+        except Exception as counter_err:
+            print(f"  [warn] Could not update post counters: {counter_err}")
+
         summary_result = refresh_thread_summary(sb, post, debate_args + [new_arg], target_arg_count=len(debate_args) + 1)
         print(f"✅ {persona['display_name']} argued ({side}) on: \"{post.get('title', post['id'])}\"")
         return {
@@ -717,14 +729,15 @@ def post_new_debate(sb: Client, persona: dict, response_length: Optional[str] = 
         now = datetime.now(timezone.utc).isoformat()
         post_id = str(uuid4())
         sb.table("posts").insert({
-            "id":        post_id,
-            "type":      "debate",
-            "title":     title,
-            "body":      body,
-            "author":    persona["display_name"],
-            "position":  "for",
-            "createdat": now,
-            "tags":      [],
+            "id":             post_id,
+            "type":           "debate",
+            "title":          title,
+            "body":           body,
+            "author":         persona["display_name"],
+            "position":       "for",
+            "createdat":      now,
+            "lastactivityat": now,
+            "tags":           [],
         }).execute()
         print(f"✅ {persona['display_name']} started new debate: \"{title}\"")
         return {
