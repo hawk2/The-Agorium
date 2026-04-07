@@ -10,8 +10,8 @@ const BOT_UI_ACTION_MAX_CLAIM_ATTEMPTS = 5;
 const SIDE_CLASSIFY_MAX_ATTEMPTS = 3;
 const SWITCH_DECISION_MAX_ATTEMPTS = 3;
 const DECISION_MAX_COMPLETION_TOKENS = 256;
-const ARGUMENT_MAX_COMPLETION_TOKENS = 1200;
-const NEW_POST_MAX_COMPLETION_TOKENS = 900;
+const ARGUMENT_MAX_COMPLETION_TOKENS = 3000;
+const NEW_POST_MAX_COMPLETION_TOKENS = 4000;
 const THREAD_SUMMARY_MAX_COMPLETION_TOKENS = 900;
 const MODEL_EMPTY_RETRY_ATTEMPTS = 3;
 const THREAD_SUMMARY_INTERVAL = 5;
@@ -674,6 +674,7 @@ async function generateArgument(
 
 function cleanTitleLine(s: string): string {
   s = s.trim();
+  s = s.replace(/^\s*\d+\s*[\).\:-]\s*/, "");    // 1. Title → Title
   s = s.replace(/^#+\s*/, "");                    // ## Heading → Heading
   s = s.replace(/^\*\*(.+)\*\*$/, "$1");          // **Bold** → Bold
   s = s.replace(/^__(.+)__$/, "$1");              // __Bold__ → Bold
@@ -682,6 +683,14 @@ function cleanTitleLine(s: string): string {
     "",
   );
   return s.replace(/^['"]|['"]$/g, "").trim();    // strip surrounding quotes
+}
+
+function cleanGeneratedBodyLine(s: string): string {
+  const cleaned = String(s ?? "")
+    .trim()
+    .replace(/^\s*\d+\s*[\).\:-]\s*/, "");
+  if (/^(blank|line\s*\d+\s*:?)$/i.test(cleaned)) return "";
+  return cleaned;
 }
 
 function parseNewPostOutput(raw: string): { title: string; body: string } | null {
@@ -703,7 +712,7 @@ function parseNewPostOutput(raw: string): { title: string; body: string } | null
   if (!title) return null;
 
   // Everything after the title is body; skip blank separator lines
-  const bodyLines = lines.slice(titleIdx + 1);
+  const bodyLines = lines.slice(titleIdx + 1).map(cleanGeneratedBodyLine);
   let start = 0;
   for (let i = 0; i < bodyLines.length; i++) {
     if (bodyLines[i].trim()) {
@@ -718,16 +727,23 @@ function parseNewPostOutput(raw: string): { title: string; body: string } | null
   }
 
   // Fallback parse: model returned everything on one line (no newline between title and body).
-  // Split at the first sentence boundary so the opening sentence becomes the title
-  // and the rest becomes the body.
+  // Split at ALL sentence boundaries so the opening sentence becomes the title
+  // and everything that follows becomes the body.
   if (title) {
-    const parts = raw.trim().split(/(?<=[.?!])\s+/, 2);
-    if (parts.length === 2) {
+    const parts = raw.trim().split(/(?<=[.?!])\s+/);
+    if (parts.length >= 2) {
       const newTitle = cleanTitleLine(parts[0]).slice(0, 220);
-      const newBody  = toOneParagraph(parts[1]);
+      const newBody  = toOneParagraph(parts.slice(1).join(" "));
       if (newTitle.length >= 3 && newBody.length >= 3) {
         return { title: newTitle, body: newBody.slice(0, 5000) };
       }
+    }
+
+    // Last-resort: model returned only a title-length sentence with no body.
+    // Use the title text as the body so the post makes it into the DB rather
+    // than failing all attempts.
+    if (title.length >= 10) {
+      return { title, body: title.slice(0, 5000) };
     }
   }
 
@@ -751,8 +767,11 @@ async function generateNewPost(
         content:
           `Start a brand-new debate on a topic you genuinely care about. ` +
           `Pick something political, ethical, or social — something real and contentious. ` +
-          `Format: first line is the TITLE only (no label, no markdown), blank line, then exactly one paragraph (${resolveResponseLengthDesc(responseLength)}). ` +
-          `No markdown. Be opinionated. Don't be bland.` +
+          `Respond in EXACTLY this format:\n` +
+          `1. Line 1: the TITLE only (no label, no prefix, no markdown)\n` +
+          `2. Line 2: blank\n` +
+          `3. Lines 3+: exactly one paragraph (${resolveResponseLengthDesc(responseLength)}) making your argument\n` +
+          `No markdown anywhere. Be opinionated. Don't be bland.` +
           hintLine,
       },
     ],
