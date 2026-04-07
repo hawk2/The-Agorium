@@ -558,6 +558,7 @@
         flash('warning', 'Action queued, but immediate runner trigger failed' + suffix + '. It will run on the next bot invocation.');
       }
       await loadActions();
+      await loadDebates();
     });
 
     refreshUi();
