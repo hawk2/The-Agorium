@@ -220,9 +220,44 @@ def extract_response_text(response) -> str:
     """Safely extract text from an OpenAI Responses API response."""
     if response is None:
         return ""
-    text = getattr(response, "output_text", None)
-    if isinstance(text, str):
-        return text
+
+    # Primary: output_text convenience property (may raise or be None)
+    try:
+        text = response.output_text
+        if isinstance(text, str) and text.strip():
+            return text
+    except Exception:
+        pass
+
+    # Fallback: walk the output list manually
+    try:
+        for item in (getattr(response, "output", None) or []):
+            # Message items have a content list
+            content = getattr(item, "content", None)
+            if isinstance(content, list):
+                for part in content:
+                    t = getattr(part, "text", None)
+                    if isinstance(t, str) and t.strip():
+                        return t
+            # Some items expose text directly
+            t = getattr(item, "text", None)
+            if isinstance(t, str) and t.strip():
+                return t
+            # Refusal text is still usable for parse attempts
+            r = getattr(item, "refusal", None)
+            if isinstance(r, str) and r.strip():
+                return r
+    except Exception:
+        pass
+
+    # Debug: log the raw response so we can diagnose unexpected structures
+    try:
+        print(f"  [debug] extract_response_text got no text. "
+              f"type={type(response).__name__} "
+              f"output_len={len(getattr(response, 'output', []))}")
+    except Exception:
+        pass
+
     return ""
 
 
